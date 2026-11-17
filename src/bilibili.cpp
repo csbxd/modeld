@@ -24,8 +24,7 @@ MediaUrl media_url_parts(const std::string &url) {
 std::vector<std::string> bilibili_video_sources(const std::string &source, const Json &playinfo) {
     const auto chosen = media_url_parts(source);
     if (chosen.file.empty() || !playinfo.is_object() || !playinfo.contains("dash") ||
-        !playinfo["dash"].is_object() || !playinfo["dash"].contains("video") ||
-        !playinfo["dash"]["video"].is_array())
+        !playinfo["dash"].is_object())
         return {source};
     std::vector<std::string> urls;
     auto add = [&](const Json &value) {
@@ -39,17 +38,31 @@ std::vector<std::string> bilibili_video_sources(const std::string &source, const
             std::find(urls.begin(), urls.end(), url) == urls.end() && urls.size() < 8)
             urls.push_back(url);
     };
-    for (const auto &video : playinfo["dash"]["video"]) {
-        if (!video.is_object())
-            continue;
-        for (const auto *name : {"baseUrl", "base_url"})
-            if (video.contains(name))
-                add(video[name]);
-        for (const auto *name : {"backupUrl", "backup_url"})
-            if (video.contains(name) && video[name].is_array())
-                for (const auto &backup : video[name])
-                    add(backup);
-    }
+    auto collect = [&](const Json &entries) {
+        if (!entries.is_array())
+            return;
+        for (const auto &video : entries) {
+            if (!video.is_object())
+                continue;
+            for (const auto *name : {"baseUrl", "base_url"})
+                if (video.contains(name))
+                    add(video[name]);
+            for (const auto *name : {"backupUrl", "backup_url"})
+                if (video.contains(name) && video[name].is_array())
+                    for (const auto &backup : video[name])
+                        add(backup);
+        }
+    };
+    for (const auto *type : {"video", "audio"})
+        if (playinfo["dash"].contains(type))
+            collect(playinfo["dash"][type]);
+    // Bilibili exposes lossless and Dolby audio outside dash.audio.
+    if (playinfo["dash"].contains("flac") && playinfo["dash"]["flac"].is_object() &&
+        playinfo["dash"]["flac"].contains("audio"))
+        collect(Json::array({playinfo["dash"]["flac"]["audio"]}));
+    if (playinfo["dash"].contains("dolby") && playinfo["dash"]["dolby"].is_object() &&
+        playinfo["dash"]["dolby"].contains("audio"))
+        collect(playinfo["dash"]["dolby"]["audio"]);
     std::stable_sort(urls.begin(), urls.end(), [](const auto &a, const auto &b) {
         auto rank = [](const auto &url) {
             const auto parts = media_url_parts(url);

@@ -2,5 +2,6 @@
   "api": "http://s8030.netbird.cloud:8765",
   "api_address": "",
   "token_file": "/etc/modeld/api.token",
-  "callback_address": "auto"
+  "callback_address": "auto",
+  "media_cache_bytes": 268435456
 }

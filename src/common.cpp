@@ -224,6 +224,7 @@ Json model_catalog(bool ready) {
                                    {"max_long_side", 1920},
                                    {"max_short_side", 1080},
                                    {"max_pixels", 2073600},
+                                   {"output_modes", Json::array({"video", "main"})},
                                    {"target_fps", 60}}})}};
 }
 std::string playlist(double duration, int fps, int seconds) {

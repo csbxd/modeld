@@ -84,6 +84,10 @@ bool http(const std::string &url) {
 }
 } // namespace
 std::string resolved_video_url(const std::string &opened, const Json &selected) {
+    return resolved_track_url(opened, selected, "video");
+}
+std::string resolved_track_url(const std::string &opened, const Json &selected,
+                               const std::string &kind) {
     if (http(opened))
         return opened;
     if (!opened.starts_with("edl://"))
@@ -95,6 +99,7 @@ std::string resolved_video_url(const std::string &opened, const Json &selected) 
         int64_t program = -1;
         int segments = 0;
         bool video = false, typed = false, no_clip = false, unsupported = false;
+        std::string type;
     } current;
     std::vector<Stream> streams;
     auto finish = [&] {
@@ -112,6 +117,7 @@ std::string resolved_video_url(const std::string &opened, const Json &selected) 
             if (type != entry.fields.end()) {
                 current.typed = true;
                 current.video |= type->second == "video";
+                current.type = type->second;
             }
         } else if (entry.first == "!track_meta") {
             auto program = entry.fields.find("program_id");
@@ -152,7 +158,7 @@ std::string resolved_video_url(const std::string &opened, const Json &selected) 
                                   {"selected", log_tracks(Json::array({selected}))}});
     std::vector<const Stream *> candidates;
     for (const auto &stream : streams)
-        if (stream.video || !stream.typed)
+        if (stream.type == kind || !stream.typed)
             candidates.push_back(&stream);
     const Stream *chosen = nullptr;
     if (selected.contains("program-id")) {
@@ -166,6 +172,11 @@ std::string resolved_video_url(const std::string &opened, const Json &selected) 
     }
     if (!chosen && candidates.size() == 1)
         chosen = candidates.front();
+    if (!chosen && kind == "audio" && selected.contains("id")) {
+        const auto index = selected.at("id").get<int>() - 1;
+        if (index >= 0 && static_cast<size_t>(index) < candidates.size())
+            chosen = candidates[index];
+    }
     const std::string reason = !chosen                 ? "selected_stream_not_unique"
                                : chosen->segments != 1 ? "multiple_segments"
                                : chosen->unsupported   ? "fragmented_or_clipped_stream"

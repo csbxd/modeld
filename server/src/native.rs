@@ -19,6 +19,7 @@ pub struct Segment {
 pub struct SourceControl {
     pub timeout_seconds: i32,
     pub cancellation: Arc<Cancellation>,
+    pub media_options: String,
 }
 
 #[cfg(feature = "native")]
@@ -50,8 +51,11 @@ mod implementation {
             encoder: *const c_char,
             source_timeout_seconds: c_int,
             cancel_token: *mut c_void,
+            media_options: *const c_char,
             info: *mut Info,
         ) -> *mut c_void;
+        fn modeld_video_metadata(video: *mut c_void) -> *const c_char;
+        fn modeld_video_header(video: *mut c_void, out: *mut RawSegment) -> c_int;
         fn modeld_video_cancel(video: *mut c_void);
         fn modeld_video_free(video: *mut c_void);
         fn modeld_video_render(video: *mut c_void, sequence: i64, out: *mut RawSegment) -> c_int;
@@ -119,6 +123,8 @@ mod implementation {
     pub struct Video {
         ptr: NonNull<c_void>,
         pub info: Info,
+        pub metadata: serde_json::Value,
+        pub header: Vec<u8>,
         _backend: Arc<Backend>,
     }
     // Opening/probing precedes publication. Render is called only on the one GPU
@@ -138,6 +144,7 @@ mod implementation {
             let u = cstring(url)?;
             let headers = cstring(source_headers)?;
             let encoder = cstring(encoder)?;
+            let media_options = cstring(&control.media_options)?;
             let mut info = Info::default();
             let ptr = NonNull::new(unsafe {
                 modeld_video_open(
@@ -149,13 +156,36 @@ mod implementation {
                     encoder.as_ptr(),
                     control.timeout_seconds,
                     control.cancellation.0.as_ptr(),
+                    media_options.as_ptr(),
                     &mut info,
                 )
             })
             .ok_or_else(error)?;
+            let metadata =
+                unsafe { CStr::from_ptr(modeld_video_metadata(ptr.as_ptr())) }.to_string_lossy();
+            let metadata = match serde_json::from_str(&metadata) {
+                Ok(value) => value,
+                Err(_) => {
+                    unsafe { modeld_video_free(ptr.as_ptr()) };
+                    return Err(ApiError::new(502, "Invalid native media metadata"));
+                }
+            };
+            let mut raw = RawSegment::default();
+            if unsafe { modeld_video_header(ptr.as_ptr(), &mut raw) } != 0 {
+                unsafe { modeld_video_free(ptr.as_ptr()) };
+                return Err(error());
+            }
+            let header = if raw.length == 0 {
+                Vec::new()
+            } else {
+                unsafe { std::slice::from_raw_parts(raw.data, raw.length) }.to_vec()
+            };
+            unsafe { modeld_segment_free(&mut raw) };
             Ok(Arc::new(Self {
                 ptr,
                 info,
+                metadata,
+                header,
                 _backend: backend,
             }))
         }
@@ -206,6 +236,8 @@ mod implementation {
     }
     pub struct Video {
         pub info: Info,
+        pub metadata: serde_json::Value,
+        pub header: Vec<u8>,
     }
     impl Video {
         pub fn open(
@@ -217,7 +249,11 @@ mod implementation {
             _: &str,
             control: &SourceControl,
         ) -> Result<Arc<Self>, ApiError> {
-            let _ = (control.timeout_seconds, &control.cancellation);
+            let _ = (
+                control.timeout_seconds,
+                &control.cancellation,
+                &control.media_options,
+            );
             Err(ApiError::new(503, "Native GPU backend was not compiled"))
         }
         pub fn cancel(&self) {}

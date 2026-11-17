@@ -23,6 +23,10 @@ flowchart LR
 
 B 站等网站视频使用 mpv 已解析的实际媒体地址。插件从 `stream-open-filename` 的 DASH/EDL 时间轴中选取当前视频节目，并传递播放器使用的 Referer、User-Agent 等 HTTP 请求头，音轨与弹幕字幕继续由原播放器管理。不会把网页地址当作视频，也不会再次调用解析器。需要同时更新客户端与服务端到 0.1.2 或更新版本。
 
+AV1 媒体源使用 FFmpeg 的 `libdav1d` 软件解码器，0.1.3 服务端 ebuild 强制启用 `ffmpeg[dav1d]`。仅有 FFmpeg 的原生 `av1` 或 `av1_cuvid` 解码器不足以供当前软件帧处理路径使用。H.264、HEVC 继续使用对应的软件解码器；无需改选其他源画质。
+
+已用实际 720p/30 fps AV1 DASH 视频验证解码和插帧：播放推进超过 33 秒，保留原 AAC/ASS，输出 HEVC 60 fps，掉帧为 0，最大采样音画差约 34.3 ms。[AV1 测试数据](docs/validation-20261117-av1.json) 包含启动预缓冲，使用无显示输出。
+
 已使用实际 B 站 1080p/30 fps DASH 视频验证：外部视频轨为 HEVC 60 fps，原 AAC 与 ASS 保留，约 30 秒播放时钟测试掉帧为 0、最大音画差约 32 ms，并完成暂停状态下前后拖动。[测试数据](docs/validation-20261117-bilibili.json) 使用无显示输出，不代表所有站点或网络条件。
 
 ## Gentoo 安装

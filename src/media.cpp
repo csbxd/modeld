@@ -284,13 +284,19 @@ Video::Video(const std::string &url, const std::string &source_headers, int seco
                : stream->start_time != AV_NOPTS_VALUE
                    ? stream->start_time * av_q2d(stream->time_base)
                    : 0;
-    const auto *codec = avcodec_find_decoder(p->codec_id);
+    // FFmpeg's native AV1 decoder can be hardware-only. This reader produces
+    // software frames for swscale, so use dav1d explicitly for AV1 sources.
+    const auto *codec = p->codec_id == AV_CODEC_ID_AV1 ? avcodec_find_decoder_by_name("libdav1d")
+                                                       : avcodec_find_decoder(p->codec_id);
+    if (!codec && p->codec_id == AV_CODEC_ID_AV1)
+        throw Error(422, "AV1 sources require FFmpeg with the libdav1d software decoder");
     if (!codec)
         throw Error(422, "Source video decoder unavailable");
     v.decoder = avcodec_alloc_context3(codec);
     avcheck(avcodec_parameters_to_context(v.decoder, p), "Configure source decoder");
     v.decoder->thread_count = 4;
     avcheck(avcodec_open2(v.decoder, codec, nullptr), "Open source decoder");
+    std::cerr << "[modeld] Source decoder: " << codec->name << '\n';
     v.first = v.read_frame();
     v.last = v.read_frame();
     if (!v.first)

@@ -45,7 +45,9 @@ extern "C" cudaError_t modeld_pack_nv12(const float *, uint8_t *, uint8_t *, int
                                         cudaStream_t);
 namespace modeld {
 struct Rife::Impl {
-    Logger logger;
+    // TensorRT shares one logger across runtimes; it must outlive every cached
+    // resolution profile, including profiles whose original instance is evicted.
+    static Logger logger;
     int w, h;
     std::unique_ptr<nvinfer1::IRuntime> runtime;
     std::unique_ptr<nvinfer1::ICudaEngine> engine;
@@ -81,6 +83,7 @@ struct Rife::Impl {
     std::array<Slot, 2> slots;
     Impl(int width, int height) : w(width), h(height) {}
 };
+Logger Rife::Impl::logger;
 Rife::Rife(const std::filesystem::path &model, const std::filesystem::path &directory, int w, int h)
     : impl(std::make_unique<Impl>(w, h)) {
     if (w < 32 || h < 32 || w > 1920 || h > 1080 || w % 2 || h % 2)

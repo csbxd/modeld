@@ -1,0 +1,142 @@
+{
+  "date": "2026-11-17",
+  "version": "0.1.3",
+  "site": "bilibili.com",
+  "source": {
+    "codec": "av1",
+    "width": 1280,
+    "height": 720,
+    "fps": 30
+  },
+  "source_decoder": "libdav1d",
+  "output": {
+    "codec": "hevc",
+    "width": 1280,
+    "height": 720,
+    "fps": 60,
+    "model": "RIFE 4.26 Heavy FP32"
+  },
+  "preserved_tracks": [
+    "original AAC audio",
+    "original ASS subtitles"
+  ],
+  "test_mode": "asa original mpv configuration; null video/audio outputs; native server candidate on s8030",
+  "sampling": "Three-second intervals, with a gap before sample 10; includes startup buffering",
+  "max_dropped_frames": 0,
+  "max_audio_video_difference_seconds": 0.034342000000002315,
+  "paused_samples": 5,
+  "samples": [
+    {
+      "sample": 0,
+      "video": 0.000000,
+      "audio": 0.005609,
+      "pause": true,
+      "dropped": 0
+    },
+    {
+      "sample": 1,
+      "video": 0.000000,
+      "audio": 0.005609,
+      "pause": true,
+      "dropped": 0
+    },
+    {
+      "sample": 2,
+      "video": 0.000000,
+      "audio": 0.005609,
+      "pause": true,
+      "dropped": 0
+    },
+    {
+      "sample": 3,
+      "video": 0.000000,
+      "audio": 0.005609,
+      "pause": true,
+      "dropped": 0
+    },
+    {
+      "sample": 4,
+      "video": 0.000000,
+      "audio": 0.005609,
+      "pause": true,
+      "dropped": 0
+    },
+    {
+      "sample": 5,
+      "video": 2.950000,
+      "audio": 2.917494,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 6,
+      "video": 5.950000,
+      "audio": 5.937898,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 7,
+      "video": 8.966667,
+      "audio": 8.945041,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 8,
+      "video": 11.983333,
+      "audio": 11.952610,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 9,
+      "video": 14.983333,
+      "audio": 14.966139,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 10,
+      "video": 18.000000,
+      "audio": 17.980359,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 11,
+      "video": 21.000000,
+      "audio": 20.983937,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 12,
+      "video": 24.000000,
+      "audio": 23.987593,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 13,
+      "video": 27.000000,
+      "audio": 26.990412,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 14,
+      "video": 30.000000,
+      "audio": 29.995274,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 15,
+      "video": 33.033313,
+      "audio": 32.998971,
+      "pause": false,
+      "dropped": 0
+    }
+  ]
+}

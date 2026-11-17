@@ -19,8 +19,8 @@ class Video {
     std::unique_ptr<Impl> impl;
 
   public:
-    Video(const std::string &source, const std::string &source_headers, int segment_seconds, int qp,
-          const std::string &encoder, RifeFactory factory,
+    Video(const std::vector<std::string> &sources, const std::string &source_headers,
+          int segment_seconds, int qp, const std::string &encoder, RifeFactory factory,
           std::shared_ptr<std::atomic<bool>> cancelled);
     ~Video();
     MediaInfo info() const;

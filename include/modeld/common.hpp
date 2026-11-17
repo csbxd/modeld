@@ -25,6 +25,9 @@ Json request_json(const Json &config, const std::string &method, const std::stri
 std::string netbird_address();
 std::string media_url(const std::string &url);
 std::string resolved_video_url(const std::string &opened, const Json &selected_track);
+std::vector<std::string> bilibili_video_sources(const std::string &source, const Json &playinfo);
+std::vector<std::string> resolve_video_sources(const std::string &webpage,
+                                               const std::string &source);
 std::filesystem::path client_log_path();
 void log_event(const std::string &event, const Json &details = Json::object()) noexcept;
 std::string log_url(const std::string &url);
@@ -46,6 +49,7 @@ struct MediaProxy {
     ~MediaProxy();
     std::string url() const;
     double buffered_ahead(double position) const;
+    std::string failure() const;
     MediaProxy(const MediaProxy &) = delete;
 };
 } // namespace modeld

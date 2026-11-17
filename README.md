@@ -25,6 +25,16 @@ B 站等网站视频使用 mpv 已解析的实际媒体地址。插件从 `strea
 
 AV1 媒体源使用 FFmpeg 的 `libdav1d` 软件解码器，0.1.3 服务端 ebuild 强制启用 `ffmpeg[dav1d]`。仅有 FFmpeg 的原生 `av1` 或 `av1_cuvid` 解码器不足以供当前软件帧处理路径使用。H.264、HEVC 继续使用对应的软件解码器；无需改选其他源画质。
 
+0.1.5 修复 B 站 MCDN 取源断线后损坏分段的问题。客户端向 B 站播放接口查询当前 DASH 文件的备用地址，按包含 cid、分 P 和编码编号的完整文件名匹配，优先使用官方提供的 UPOS HTTPS 地址；查询不到相同编码时继续使用原地址。它不重新选择分辨率或编码，也不修改 CDN 主机或签名。
+
+服务端支持有限 HTTP 重连，遇到不完整数据包、解码或定位错误时重新打开取源连接与解码器，从分段起点重新生成视频，必要时切换备用地址。备用源须匹配原编码、尺寸、帧率和时长。失败分段允许再次生成；客户端对临时网络错误和 408/429/500/502/503/504 最多请求三次，仍失败时记录真实状态并恢复原视频轨，避免持续停在缓冲状态。
+
+开启插帧期间，当前文件临时禁用 mpv 的缓存定位，保留前向缓冲，关闭插帧后恢复原选项。这样回到已缓存的位置也会重新请求 HLS 分段，避免播放器复用旧画面缓存而插件一直等候新缓冲的情况。
+
+中途开启后显式对齐当前播放位置，直接请求对应的 HLS 分段。在实际 B 站 720p AV1 视频上验证了连续播放、跳至 6420.98 秒、退回 300 秒和 85.7 秒，以及关闭插帧后的选项恢复；采样掉帧为 0、最大采样音画差约 29.2 ms。[播放与定位测试数据](docs/validation-20261117-playback-recovery.json) 使用无显示输出，包含启动缓冲。
+
+使用真实 AV1 样本主动切断主源，并让后续主源请求返回 503，已验证切换备用源后重新生成完整 120 帧 HEVC 分段。[断线恢复测试数据](docs/validation-20261117-recovery.json) 包含首次加载分辨率引擎的时间，不代表稳态推理吞吐。
+
 已用实际 720p/30 fps AV1 DASH 视频验证解码和插帧：播放推进超过 33 秒，保留原 AAC/ASS，输出 HEVC 60 fps，掉帧为 0，最大采样音画差约 34.3 ms。[AV1 测试数据](docs/validation-20261117-av1.json) 包含启动预缓冲，使用无显示输出。
 
 已使用实际 B 站 1080p/30 fps DASH 视频验证：外部视频轨为 HEVC 60 fps，原 AAC 与 ASS 保留，约 30 秒播放时钟测试掉帧为 0、最大音画差约 32 ms，并完成暂停状态下前后拖动。[测试数据](docs/validation-20261117-bilibili.json) 使用无显示输出，不代表所有站点或网络条件。
@@ -88,12 +98,15 @@ modelctl log-path    # 显示完整路径
   "task": "frame_interpolation",
   "model": "rife-4.26-heavy-fp32",
   "source_url": "http://YOUR_NETBIRD_IP:PORT/source/PRIVATE_CAPABILITY",
+  "source_backups": [],
   "source_headers": {},
   "target_fps": 60
 }
 ```
 
 `source_headers` 可选，旧客户端可以省略。用于媒体源的 Referer、User-Agent、Cookie、Origin、Authorization、Accept、Accept-Language、X-Forwarded-For；限制字段数、长度和换行，拒绝 Host、Range 等协议控制字段。这些请求头仅用于取源，不添加到返回的视频 URL 中。
+
+`source_backups` 在 0.1.5 加入，最多八个 HTTP(S) 地址，必须指向同一份视频。旧客户端省略此字段仍可使用服务端重连和分段恢复。
 
 服务端提供固定上限的会话数、GPU 队列、分辨率引擎缓存与视频分段缓存。仅提前生成一个后续分段以覆盖网络传输延迟；暂停后停止新增计算，取消会话会中断源读取和剩余帧生成。默认最多 2 个会话、8 个排队任务、每会话缓存 12 个 2 秒分段、120 秒空闲回收。
 
@@ -139,3 +152,5 @@ MODELD_NATIVE_LIB_DIR="$PWD/build-server" cargo build --locked --release
 ```
 
 默认 CUDA 架构面向 RTX 4080 SUPER 的 SM 89。其他 GPU 需使用对应的 CUDA 架构重新构建。API 单元测试不使用伪造推理作为生产回退；实际推理、编码、网络与 mpv 播放需要在目标机器上单独验证。
+
+服务端启用 `BUILD_TESTING` 后还构建手工故障测试源 `modeld-fault-source VIDEO PORT`，仅监听 127.0.0.1。以 `/primary` 和 `/backup` 创建会话，随后 `POST /fail` 会切断主连接并使后续主源请求返回 503。通过实际模型请求分段并检查 `/stats`、服务日志及输出帧数，可以验证断线、备用源切换和完整分段重建；此工具不安装到系统。

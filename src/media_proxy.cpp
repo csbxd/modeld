@@ -39,6 +39,7 @@ struct MediaProxy::Impl {
     int seconds = 2, port = 0;
     double duration = 0;
     std::string origin, prefix, token, playlist;
+    std::string failure;
     static constexpr int window = 6;
 
     void fail_locked(const std::shared_ptr<Entry> &entry, const char *message) {
@@ -87,39 +88,72 @@ struct MediaProxy::Impl {
                     continue;
             }
             auto bytes = std::make_shared<std::string>();
-            auto response = client->Get(
-                prefix + "segments/" + std::to_string(task.index) + ".ts",
-                [&](const httplib::Response &header) {
-                    if (header.status != 200)
-                        return false;
-                    std::lock_guard lock(mutex);
-                    if (stopping || task.generation != generation)
-                        return false;
-                    frontier = std::max(frontier, task.index);
-                    prefetch_locked();
-                    cv.notify_all();
-                    return true;
-                },
-                [&](const char *data, size_t size) {
-                    if (stopping || task.generation != generation ||
-                        bytes->size() + size > 64 * 1024 * 1024)
-                        return false;
-                    bytes->append(data, size);
-                    return true;
-                });
+            const auto started = Clock::now();
+            int status = 0;
+            bool transferred = false;
+            std::string error;
+            for (int attempt = 0; attempt < 3; ++attempt) {
+                bytes->clear();
+                status = 0;
+                auto response = client->Get(
+                    prefix + "segments/" + std::to_string(task.index) + ".ts",
+                    [&](const httplib::Response &header) {
+                        status = header.status;
+                        if (header.status != 200)
+                            return true;
+                        std::lock_guard lock(mutex);
+                        if (stopping || task.generation != generation)
+                            return false;
+                        frontier = std::max(frontier, task.index);
+                        prefetch_locked();
+                        cv.notify_all();
+                        return true;
+                    },
+                    [&](const char *data, size_t size) {
+                        if (stopping || task.generation != generation ||
+                            bytes->size() + size > 64 * 1024 * 1024)
+                            return false;
+                        if (status == 200)
+                            bytes->append(data, size);
+                        return true;
+                    });
+                if (response)
+                    status = response->status;
+                error = httplib::to_string(response.error());
+                transferred = response && status == 200;
+                if (transferred || stopping || task.generation != generation)
+                    break;
+                const bool transient = status == 0 || status == 408 || status == 429 ||
+                                       status == 500 || status == 502 || status == 503 ||
+                                       status == 504;
+                if (!transient || attempt == 2)
+                    break;
+                log_event("media.segment.retry", {{"index", task.index},
+                                                  {"status", status},
+                                                  {"attempt", attempt + 1},
+                                                  {"error", error}});
+                std::unique_lock lock(mutex);
+                cv.wait_for(lock, std::chrono::milliseconds(400 * (attempt + 1)),
+                            [&] { return stopping || task.generation != generation; });
+            }
             {
                 std::lock_guard lock(mutex);
                 if (task.entry->completed)
                     continue;
-                if (stopping || task.generation != generation || !response ||
-                    response->status != 200) {
-                    if (!stopping && task.generation == generation)
+                if (stopping || task.generation != generation || !transferred) {
+                    if (!stopping && task.generation == generation) {
                         log_event("media.segment.failed",
-                                  {{"index", task.index},
-                                   {"status", response ? response->status : 0},
-                                   {"error", httplib::to_string(response.error())}});
+                                  {{"index", task.index}, {"status", status}, {"error", error}});
+                        failure = "远端视频分段读取失败（HTTP " + std::to_string(status) + "）";
+                    }
                     fail_locked(task.entry, "Remote video transfer failed");
                 } else {
+                    log_event("media.segment.complete",
+                              {{"index", task.index},
+                               {"bytes", bytes->size()},
+                               {"elapsed_ms", std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                  Clock::now() - started)
+                                                  .count()}});
                     task.entry->completed = true;
                     completed.insert(task.index);
                     task.entry->promise.set_value(bytes);
@@ -260,5 +294,9 @@ double MediaProxy::buffered_ahead(double position) const {
         last++;
     return std::max(0.0,
                     std::min(impl->duration, last * static_cast<double>(impl->seconds)) - position);
+}
+std::string MediaProxy::failure() const {
+    std::lock_guard lock(impl->mutex);
+    return impl->failure;
 }
 } // namespace modeld

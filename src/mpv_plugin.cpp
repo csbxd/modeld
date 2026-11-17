@@ -75,7 +75,7 @@ void osd(mpv_handle *m, const std::string &s, int milliseconds = 4000) {
 } // namespace
 extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handle *m) {
     using namespace modeld;
-    std::string id, original_vid, enabled_entry;
+    std::string id, original_vid, enabled_entry, original_cache_seek;
     std::unique_ptr<SourceServer> source;
     std::unique_ptr<MediaProxy> media;
     bool buffering = false, activating = false;
@@ -95,6 +95,12 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
         }
         media.reset();
         source.reset();
+        if (!original_cache_seek.empty()) {
+            if (playing_entry(m) == enabled_entry)
+                mpv_set_property_string(m, "file-local-options/demuxer-seekable-cache",
+                                        original_cache_seek.c_str());
+            original_cache_seek.clear();
+        }
         if (buffering || activating) {
             int pause = activating ? activation_pause : 0;
             mpv_set_property(m, "pause", MPV_FORMAT_FLAG, &pause);
@@ -235,15 +241,22 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                         url = source->url();
                     }
                     stage = "session.create";
+                    auto urls = resolve_video_sources(path, url);
+                    url = urls.front();
+                    Json backups = Json::array();
+                    for (size_t n = 1; n < urls.size(); ++n)
+                        backups.push_back(urls[n]);
                     Json header_names = Json::array();
                     for (const auto &[name, value] : headers.items())
                         header_names.push_back(name);
-                    log_event("session.create",
-                              {{"source", log_url(url)}, {"header_names", header_names}});
+                    log_event("session.create", {{"source", log_url(url)},
+                                                 {"backup_count", backups.size()},
+                                                 {"header_names", header_names}});
                     auto result = request_json(config, "POST", "/v1/sessions",
                                                {{"model", model_id},
                                                 {"task", "frame_interpolation"},
                                                 {"source_url", url},
+                                                {"source_backups", backups},
                                                 {"source_headers", headers},
                                                 {"target_fps", 60}});
                     id = result.at("id").get<std::string>();
@@ -257,11 +270,29 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                     stage = "media.timeline";
                     media = std::make_unique<MediaProxy>(
                         result.at("playlist_url").get<std::string>(), media_duration);
+                    // Cached seeks can bypass the proxy after its generation
+                    // changed, leaving the buffer guard waiting for segments
+                    // mpv will never request. Keep forward buffering, but make
+                    // seeks go through the HLS source while RIFE is enabled.
+                    original_cache_seek = property(m, "file-local-options/demuxer-seekable-cache");
+                    if (mpv_set_property_string(m, "file-local-options/demuxer-seekable-cache",
+                                                "no") < 0)
+                        throw Error(503, "Cannot configure the interpolated video seek cache");
+                    log_event("playback.cache",
+                              {{"seekable_cache", false}, {"previous", original_cache_seek}});
                     stage = "video.add";
+                    double activation_position = 0;
+                    mpv_get_property(m, "time-pos", MPV_FORMAT_DOUBLE, &activation_position);
                     log_event("video.add.begin");
                     command(m,
                             {"video-add", media->url(), "select", "modeld RIFE 4.26 Heavy FP32"});
                     log_event("video.add.ready", {{"tracks", log_tracks(tracks(m))}});
+                    // video-add may read from zero while discarding frames to
+                    // catch up. Explicitly seek all tracks so enabling RIFE in
+                    // a long video requests the current HLS segment directly.
+                    stage = "video.align";
+                    command(m, {"seek", std::to_string(activation_position), "absolute+exact"});
+                    log_event("video.aligned", {{"position", activation_position}});
                     activating = false;
                     mpv_set_property(m, "pause", MPV_FORMAT_FLAG, &activation_pause);
                     osd(m, "RIFE 4.26 Heavy FP32 · 60 fps");
@@ -273,6 +304,8 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                 mpv_get_property(m, "pause", MPV_FORMAT_FLAG, &paused);
                 mpv_get_property(m, "seeking", MPV_FORMAT_FLAG, &seeking);
                 if (!id.empty() && media) {
+                    if (auto error = media->failure(); !error.empty())
+                        throw Error(503, error);
                     double position = 0;
                     if (mpv_get_property(m, "time-pos", MPV_FORMAT_DOUBLE, &position) >= 0) {
                         auto ahead = media->buffered_ahead(position);

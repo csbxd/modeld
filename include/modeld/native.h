@@ -17,7 +17,7 @@ typedef struct {
 } ModeldSegment;
 void *modeld_context_create(const char *model, const char *cache);
 void modeld_context_free(void *context);
-void *modeld_video_open(void *context, const char *url, const char *source_headers,
+void *modeld_video_open(void *context, const char *sources_json, const char *source_headers,
                         int segment_seconds, int qp, const char *encoder, ModeldVideoInfo *info);
 void modeld_video_cancel(void *video);
 void modeld_video_free(void *video);

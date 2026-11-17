@@ -63,13 +63,14 @@ void *modeld_context_create(const char *model, const char *cache) {
 void modeld_context_free(void *c) {
     delete static_cast<Context *>(c);
 }
-void *modeld_video_open(void *context, const char *url, const char *source_headers, int seconds,
-                        int qp, const char *encoder, ModeldVideoInfo *info) {
+void *modeld_video_open(void *context, const char *sources_json, const char *source_headers,
+                        int seconds, int qp, const char *encoder, ModeldVideoInfo *info) {
     try {
         auto *c = static_cast<Context *>(context);
         auto v = std::make_unique<Video>();
         v->media = std::make_unique<modeld::Video>(
-            url, source_headers ? source_headers : "", seconds, qp, encoder,
+            modeld::Json::parse(sources_json).get<std::vector<std::string>>(),
+            source_headers ? source_headers : "", seconds, qp, encoder,
             [c](int w, int h) { return c->get(w, h); }, v->cancelled);
         auto i = v->media->info();
         *info = {i.width, i.height, i.duration, i.source_fps};

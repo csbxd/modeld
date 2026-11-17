@@ -24,6 +24,16 @@ void avcheck(int value, const char *operation) {
         throw Error(502, std::string(operation) + ": " + text);
     }
 }
+struct SourceError : Error {
+    using Error::Error;
+};
+void sourcecheck(int value, const char *operation) {
+    try {
+        avcheck(value, operation);
+    } catch (const Error &e) {
+        throw SourceError(e.status, e.what());
+    }
+}
 struct FrameDelete {
     void operator()(AVFrame *f) const {
         av_frame_free(&f);
@@ -78,6 +88,11 @@ struct Video::Impl {
     SwsContext *sws = nullptr;
     int stream = -1, segment_seconds, qp;
     std::string encoder_name;
+    std::vector<std::string> sources;
+    std::string source_headers;
+    size_t source_index = 0;
+    AVCodecID source_codec = AV_CODEC_ID_NONE;
+    bool source_ready = false;
     MediaInfo info{};
     double origin = 0;
     bool eof = false, flushed = false;
@@ -113,26 +128,33 @@ struct Video::Impl {
             int r = avcodec_receive_frame(decoder, frame.get());
             if (r == 0)
                 break;
-            if (r == AVERROR_EOF)
+            if (r == AVERROR_EOF) {
+                if (last && last->time + 1.0 < info.duration)
+                    throw SourceError(502, "Source ended before its declared duration");
                 return nullptr;
+            }
             if (r != AVERROR(EAGAIN))
-                avcheck(r, "Decode frame");
+                sourcecheck(r, "Decode frame");
             if (eof) {
                 if (flushed)
                     return nullptr;
-                avcheck(avcodec_send_packet(decoder, nullptr), "Flush decoder");
+                sourcecheck(avcodec_send_packet(decoder, nullptr), "Flush decoder");
                 flushed = true;
                 continue;
             }
             for (;;) {
                 r = av_read_frame(input, packet.p);
                 if (r == AVERROR_EOF) {
+                    if (input->pb && input->pb->error < 0 && input->pb->error != AVERROR_EOF)
+                        sourcecheck(input->pb->error, "Read source transport");
                     eof = true;
                     break;
                 }
-                avcheck(r, "Read source packet");
+                sourcecheck(r, "Read source packet");
                 if (packet.p->stream_index == stream) {
-                    avcheck(avcodec_send_packet(decoder, packet.p), "Send source packet");
+                    if (packet.p->flags & AV_PKT_FLAG_CORRUPT)
+                        throw SourceError(502, "Incomplete source video packet");
+                    sourcecheck(avcodec_send_packet(decoder, packet.p), "Send source packet");
                     av_packet_unref(packet.p);
                     break;
                 }
@@ -175,12 +197,94 @@ struct Video::Impl {
         auto *video = input->streams[stream];
         auto target =
             static_cast<int64_t>((std::max(0.0, time) + origin) / av_q2d(video->time_base));
-        avcheck(av_seek_frame(input, stream, target, AVSEEK_FLAG_BACKWARD), "Seek source");
+        sourcecheck(av_seek_frame(input, stream, target, AVSEEK_FLAG_BACKWARD), "Seek source");
         avcodec_flush_buffers(decoder);
         eof = false;
         flushed = false;
         first = read_frame();
         last = read_frame();
+        if (!first)
+            throw SourceError(502, "Source seek produced no video frames");
+    }
+    void open_source(bool initialize) {
+        check();
+        source_ready = false;
+        first.reset();
+        last.reset();
+        eof = flushed = false;
+        next_segment = initialize ? -1 : -2;
+        avcodec_free_context(&decoder);
+        avformat_close_input(&input);
+        input = avformat_alloc_context();
+        if (!input)
+            throw std::bad_alloc();
+        input->interrupt_callback = {Impl::interrupt, this};
+        AVDictionary *options = nullptr;
+        av_dict_set(&options, "rw_timeout", "8000000", 0);
+        av_dict_set(&options, "reconnect", "1", 0);
+        av_dict_set(&options, "reconnect_on_network_error", "1", 0);
+        av_dict_set(&options, "reconnect_on_http_error", "408,429,5xx", 0);
+        av_dict_set(&options, "reconnect_max_retries", "2", 0);
+        av_dict_set(&options, "reconnect_delay_max", "1", 0);
+        av_dict_set(&options, "reconnect_delay_total_max", "2", 0);
+        av_dict_set(&options, "protocol_whitelist", "http,https,tcp,tls,crypto", 0);
+        av_dict_set(&options, "user_agent", "modeld/0.1", 0);
+        if (!source_headers.empty())
+            av_dict_set(&options, "headers", source_headers.c_str(), 0);
+        int r = avformat_open_input(&input, sources[source_index].c_str(), nullptr, &options);
+        av_dict_free(&options);
+        sourcecheck(r, "Open source media");
+        sourcecheck(avformat_find_stream_info(input, nullptr), "Probe source media");
+        stream = av_find_best_stream(input, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+        sourcecheck(stream, "Find source video");
+        auto *video = input->streams[stream];
+        auto *p = video->codecpar;
+        const double duration =
+            input->duration != AV_NOPTS_VALUE ? input->duration / static_cast<double>(AV_TIME_BASE)
+            : video->duration != AV_NOPTS_VALUE ? video->duration * av_q2d(video->time_base)
+                                                : 0;
+        const double fps = av_q2d(av_guess_frame_rate(input, video, nullptr));
+        if (p->width < 32 || p->height < 32 || p->width > 1920 || p->height > 1080 ||
+            p->width % 2 || p->height % 2)
+            throw Error(422, "This release supports even native dimensions up to 1920x1080");
+        if (!std::isfinite(duration) || duration <= 0 || duration > 604800)
+            throw Error(422, "A seekable video with a known duration is required");
+        if (!std::isfinite(fps) || fps <= 0 || fps >= 60)
+            throw Error(422, "Source frame rate must be below 60 fps");
+        if (initialize) {
+            info = {p->width, p->height, duration, fps};
+            source_codec = p->codec_id;
+        } else if (p->width != info.width || p->height != info.height ||
+                   p->codec_id != source_codec || std::abs(fps - info.source_fps) > 0.01 ||
+                   std::abs(duration - info.duration) > 0.1) {
+            throw Error(422, "Backup source does not match the selected video");
+        }
+        origin = input->start_time != AV_NOPTS_VALUE
+                     ? input->start_time / static_cast<double>(AV_TIME_BASE)
+                 : video->start_time != AV_NOPTS_VALUE
+                     ? video->start_time * av_q2d(video->time_base)
+                     : 0;
+        // Native AV1 can be hardware-only; swscale requires software frames.
+        const auto *codec = p->codec_id == AV_CODEC_ID_AV1
+                                ? avcodec_find_decoder_by_name("libdav1d")
+                                : avcodec_find_decoder(p->codec_id);
+        if (!codec && p->codec_id == AV_CODEC_ID_AV1)
+            throw Error(422, "AV1 sources require FFmpeg with the libdav1d software decoder");
+        if (!codec)
+            throw Error(422, "Source video decoder unavailable");
+        decoder = avcodec_alloc_context3(codec);
+        if (!decoder)
+            throw std::bad_alloc();
+        sourcecheck(avcodec_parameters_to_context(decoder, p), "Configure source decoder");
+        decoder->thread_count = 4;
+        sourcecheck(avcodec_open2(decoder, codec, nullptr), "Open source decoder");
+        first = read_frame();
+        last = read_frame();
+        if (!first)
+            throw SourceError(502, "Source contains no video frames");
+        source_ready = true;
+        std::cerr << "[modeld] Source decoder: " << codec->name << "; source " << source_index + 1
+                  << '/' << sources.size() << '\n';
     }
     void prepare_encoder() {
         avcodec_free_context(&encoder);
@@ -241,66 +345,30 @@ struct Video::Impl {
         avcheck(r, "Open NVENC encoder");
     }
 };
-Video::Video(const std::string &url, const std::string &source_headers, int seconds, int qp,
-             const std::string &encoder, RifeFactory factory,
+Video::Video(const std::vector<std::string> &sources, const std::string &source_headers,
+             int seconds, int qp, const std::string &encoder, RifeFactory factory,
              std::shared_ptr<std::atomic<bool>> cancelled)
     : impl(std::make_unique<Impl>(seconds, qp, encoder, std::move(factory), std::move(cancelled))) {
-    if (!url.starts_with("http://") && !url.starts_with("https://"))
-        throw Error(422, "source_url must be HTTP or HTTPS");
+    if (sources.empty() || sources.size() > 9)
+        throw Error(422, "One source and at most eight backup URLs are required");
+    for (const auto &url : sources)
+        if (!url.starts_with("http://") && !url.starts_with("https://"))
+            throw Error(422, "source_url must be HTTP or HTTPS");
     auto &v = *impl;
-    v.input = avformat_alloc_context();
-    if (!v.input)
-        throw std::bad_alloc();
-    v.input->interrupt_callback = {Impl::interrupt, &v};
-    AVDictionary *options = nullptr;
-    av_dict_set(&options, "rw_timeout", "15000000", 0);
-    av_dict_set(&options, "protocol_whitelist", "http,https,tcp,tls,crypto", 0);
-    av_dict_set(&options, "user_agent", "modeld/0.1", 0);
-    if (!source_headers.empty())
-        av_dict_set(&options, "headers", source_headers.c_str(), 0);
-    int r = avformat_open_input(&v.input, url.c_str(), nullptr, &options);
-    av_dict_free(&options);
-    avcheck(r, "Open source media");
-    avcheck(avformat_find_stream_info(v.input, nullptr), "Probe source media");
-    v.stream = av_find_best_stream(v.input, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
-    avcheck(v.stream, "Find source video");
-    auto *stream = v.input->streams[v.stream];
-    auto *p = stream->codecpar;
-    double duration =
-        v.input->duration != AV_NOPTS_VALUE  ? v.input->duration / static_cast<double>(AV_TIME_BASE)
-        : stream->duration != AV_NOPTS_VALUE ? stream->duration * av_q2d(stream->time_base)
-                                             : 0;
-    double fps = av_q2d(av_guess_frame_rate(v.input, stream, nullptr));
-    v.info = {p->width, p->height, duration, fps};
-    if (p->width < 32 || p->height < 32 || p->width > 1920 || p->height > 1080 || p->width % 2 ||
-        p->height % 2)
-        throw Error(422, "This release supports even native dimensions up to 1920x1080");
-    if (!std::isfinite(duration) || duration <= 0 || duration > 604800)
-        throw Error(422, "A seekable video with a known duration is required");
-    if (!std::isfinite(fps) || fps <= 0 || fps >= 60)
-        throw Error(422, "Source frame rate must be below 60 fps");
-    v.origin = v.input->start_time != AV_NOPTS_VALUE
-                   ? v.input->start_time / static_cast<double>(AV_TIME_BASE)
-               : stream->start_time != AV_NOPTS_VALUE
-                   ? stream->start_time * av_q2d(stream->time_base)
-                   : 0;
-    // FFmpeg's native AV1 decoder can be hardware-only. This reader produces
-    // software frames for swscale, so use dav1d explicitly for AV1 sources.
-    const auto *codec = p->codec_id == AV_CODEC_ID_AV1 ? avcodec_find_decoder_by_name("libdav1d")
-                                                       : avcodec_find_decoder(p->codec_id);
-    if (!codec && p->codec_id == AV_CODEC_ID_AV1)
-        throw Error(422, "AV1 sources require FFmpeg with the libdav1d software decoder");
-    if (!codec)
-        throw Error(422, "Source video decoder unavailable");
-    v.decoder = avcodec_alloc_context3(codec);
-    avcheck(avcodec_parameters_to_context(v.decoder, p), "Configure source decoder");
-    v.decoder->thread_count = 4;
-    avcheck(avcodec_open2(v.decoder, codec, nullptr), "Open source decoder");
-    std::cerr << "[modeld] Source decoder: " << codec->name << '\n';
-    v.first = v.read_frame();
-    v.last = v.read_frame();
-    if (!v.first)
-        throw Error(422, "Source contains no video frames");
+    v.sources = sources;
+    v.source_headers = source_headers;
+    for (;;) {
+        try {
+            v.open_source(v.source_codec == AV_CODEC_ID_NONE);
+            break;
+        } catch (const SourceError &) {
+            v.check();
+            if (++v.source_index >= v.sources.size())
+                throw;
+            std::cerr << "[modeld] Initial source failed; trying backup " << v.source_index + 1
+                      << '\n';
+        }
+    }
 }
 Video::~Video() = default;
 MediaInfo Video::info() const {
@@ -315,111 +383,131 @@ Segment Video::render(int64_t sequence) {
             end = std::min(begin + 60 * v.segment_seconds, total);
     if (sequence < 0 || begin >= total)
         throw Error(404, "Segment does not exist");
-    if (v.next_segment != sequence) {
-        if (sequence != 0 || v.next_segment != -1)
-            v.seek(begin / 60.0);
-        v.prepare_encoder();
-    }
-    if (!v.rife)
-        v.rife = v.factory(v.info.width, v.info.height);
-    Mux mux;
-    avcheck(avformat_alloc_output_context2(&mux.format, nullptr, "mpegts", nullptr),
-            "Create segment muxer");
-    auto *out = avformat_new_stream(mux.format, nullptr);
-    if (!out)
-        throw std::bad_alloc();
-    avcheck(avcodec_parameters_from_context(out->codecpar, v.encoder), "Configure segment stream");
-    out->time_base = v.encoder->time_base;
-    auto *buffer = static_cast<unsigned char *>(av_malloc(65536));
-    if (!buffer)
-        throw std::bad_alloc();
-    mux.io = avio_alloc_context(buffer, 65536, 1, &mux, nullptr, Mux::write, nullptr);
-    if (!mux.io) {
-        av_free(buffer);
-        throw std::bad_alloc();
-    }
-    mux.format->pb = mux.io;
-    mux.format->flags |= AVFMT_FLAG_CUSTOM_IO;
-    mux.format->max_delay = 0;
-    mux.format->avoid_negative_ts = AVFMT_AVOID_NEG_TS_DISABLED;
-    AVDictionary *options = nullptr;
-    av_dict_set(&options, "mpegts_copyts", "1", 0);
-    av_dict_set(&options, "mpegts_flags", "resend_headers+initial_discontinuity", 0);
-    int r = avformat_write_header(mux.format, &options);
-    av_dict_free(&options);
-    avcheck(r, "Write segment header");
-    struct Pending {
-        Frame frame;
-        int slot;
-    };
-    std::deque<Pending> pending;
-    struct PendingFence {
-        std::deque<Pending> &pending;
-        std::shared_ptr<Rife> rife;
-        ~PendingFence() {
-            for (auto &entry : pending) {
-                try {
-                    rife->wait(entry.slot);
-                } catch (...) {
+    auto render_once = [&]() -> Segment {
+        if (!v.source_ready)
+            v.open_source(false);
+        if (v.next_segment != sequence) {
+            if (sequence != 0 || v.next_segment != -1)
+                v.seek(begin / 60.0);
+            v.prepare_encoder();
+        }
+        if (!v.rife)
+            v.rife = v.factory(v.info.width, v.info.height);
+        Mux mux;
+        avcheck(avformat_alloc_output_context2(&mux.format, nullptr, "mpegts", nullptr),
+                "Create segment muxer");
+        auto *out = avformat_new_stream(mux.format, nullptr);
+        if (!out)
+            throw std::bad_alloc();
+        avcheck(avcodec_parameters_from_context(out->codecpar, v.encoder),
+                "Configure segment stream");
+        out->time_base = v.encoder->time_base;
+        auto *buffer = static_cast<unsigned char *>(av_malloc(65536));
+        if (!buffer)
+            throw std::bad_alloc();
+        mux.io = avio_alloc_context(buffer, 65536, 1, &mux, nullptr, Mux::write, nullptr);
+        if (!mux.io) {
+            av_free(buffer);
+            throw std::bad_alloc();
+        }
+        mux.format->pb = mux.io;
+        mux.format->flags |= AVFMT_FLAG_CUSTOM_IO;
+        mux.format->max_delay = 0;
+        mux.format->avoid_negative_ts = AVFMT_AVOID_NEG_TS_DISABLED;
+        AVDictionary *options = nullptr;
+        av_dict_set(&options, "mpegts_copyts", "1", 0);
+        av_dict_set(&options, "mpegts_flags", "resend_headers+initial_discontinuity", 0);
+        int r = avformat_write_header(mux.format, &options);
+        av_dict_free(&options);
+        avcheck(r, "Write segment header");
+        struct Pending {
+            Frame frame;
+            int slot;
+        };
+        std::deque<Pending> pending;
+        struct PendingFence {
+            std::deque<Pending> &pending;
+            std::shared_ptr<Rife> rife;
+            ~PendingFence() {
+                for (auto &entry : pending) {
+                    try {
+                        rife->wait(entry.slot);
+                    } catch (...) {
+                    }
                 }
             }
+        } fence{pending, v.rife};
+        int packets = 0;
+        auto finish = [&] {
+            auto p = std::move(pending.front());
+            pending.pop_front();
+            v.rife->wait(p.slot);
+            avcheck(avcodec_send_frame(v.encoder, p.frame.get()), "Encode output frame");
+            Packet packet;
+            for (;;) {
+                int n = avcodec_receive_packet(v.encoder, packet.p);
+                if (n == AVERROR(EAGAIN) || n == AVERROR_EOF)
+                    break;
+                avcheck(n, "Receive encoded frame");
+                av_packet_rescale_ts(packet.p, v.encoder->time_base, out->time_base);
+                packet.p->stream_index = out->index;
+                avcheck(av_interleaved_write_frame(mux.format, packet.p), "Mux encoded frame");
+                packets++;
+            }
+        };
+        for (int64_t index = begin; index < end; index++) {
+            v.check();
+            if (pending.size() == 2)
+                finish();
+            double time = index / 60.0;
+            while (v.last && v.last->time < time - 1e-8) {
+                v.first = v.last;
+                v.last = v.read_frame();
+            }
+            auto last = v.last ? v.last : v.first;
+            double interval = last->time - v.first->time;
+            float t =
+                interval > 1e-8
+                    ? static_cast<float>(std::clamp((time - v.first->time) / interval, 0.0, 1.0))
+                    : 0;
+            auto frame = new_frame();
+            avcheck(av_hwframe_get_buffer(v.frames, frame.get(), 0), "Allocate output GPU frame");
+            frame->pts = index;
+            frame->time_base = v.encoder->time_base;
+            frame->color_range = AVCOL_RANGE_MPEG;
+            frame->color_primaries = AVCOL_PRI_BT709;
+            frame->color_trc = AVCOL_TRC_BT709;
+            frame->colorspace = AVCOL_SPC_BT709;
+            if (index == begin)
+                frame->pict_type = AV_PICTURE_TYPE_I;
+            int slot = static_cast<int>((index - begin) % 2);
+            v.rife->enqueue(slot, *v.first, *last, t, frame->data[0], frame->data[1],
+                            frame->linesize[0], frame->linesize[1]);
+            pending.push_back({std::move(frame), slot});
         }
-    } fence{pending, v.rife};
-    int packets = 0;
-    auto finish = [&] {
-        auto p = std::move(pending.front());
-        pending.pop_front();
-        v.rife->wait(p.slot);
-        avcheck(avcodec_send_frame(v.encoder, p.frame.get()), "Encode output frame");
-        Packet packet;
-        for (;;) {
-            int n = avcodec_receive_packet(v.encoder, packet.p);
-            if (n == AVERROR(EAGAIN) || n == AVERROR_EOF)
-                break;
-            avcheck(n, "Receive encoded frame");
-            av_packet_rescale_ts(packet.p, v.encoder->time_base, out->time_base);
-            packet.p->stream_index = out->index;
-            avcheck(av_interleaved_write_frame(mux.format, packet.p), "Mux encoded frame");
-            packets++;
-        }
-    };
-    for (int64_t index = begin; index < end; index++) {
-        v.check();
-        if (pending.size() == 2)
+        while (!pending.empty())
             finish();
-        double time = index / 60.0;
-        while (v.last && v.last->time < time - 1e-8) {
-            v.first = v.last;
-            v.last = v.read_frame();
+        if (packets != end - begin)
+            throw Error(500, "NVENC output was delayed; zero-latency configuration is required");
+        avcheck(av_write_trailer(mux.format), "Finish segment");
+        avio_flush(mux.io);
+        v.next_segment = sequence + 1;
+        return {std::move(mux.bytes), static_cast<int>(end - begin),
+                std::chrono::duration<double>(Clock::now() - started).count()};
+    };
+    for (int attempt = 0;; ++attempt) {
+        try {
+            return render_once();
+        } catch (const SourceError &e) {
+            v.check();
+            v.source_ready = false;
+            v.next_segment = -2;
+            std::cerr << "[modeld] Source recovery: segment " << sequence << ", attempt "
+                      << attempt + 1 << ": " << e.what() << '\n';
+            v.source_index = (v.source_index + 1) % v.sources.size();
+            if (attempt >= 1)
+                throw;
         }
-        auto last = v.last ? v.last : v.first;
-        double interval = last->time - v.first->time;
-        float t = interval > 1e-8
-                      ? static_cast<float>(std::clamp((time - v.first->time) / interval, 0.0, 1.0))
-                      : 0;
-        auto frame = new_frame();
-        avcheck(av_hwframe_get_buffer(v.frames, frame.get(), 0), "Allocate output GPU frame");
-        frame->pts = index;
-        frame->time_base = v.encoder->time_base;
-        frame->color_range = AVCOL_RANGE_MPEG;
-        frame->color_primaries = AVCOL_PRI_BT709;
-        frame->color_trc = AVCOL_TRC_BT709;
-        frame->colorspace = AVCOL_SPC_BT709;
-        if (index == begin)
-            frame->pict_type = AV_PICTURE_TYPE_I;
-        int slot = static_cast<int>((index - begin) % 2);
-        v.rife->enqueue(slot, *v.first, *last, t, frame->data[0], frame->data[1],
-                        frame->linesize[0], frame->linesize[1]);
-        pending.push_back({std::move(frame), slot});
     }
-    while (!pending.empty())
-        finish();
-    if (packets != end - begin)
-        throw Error(500, "NVENC output was delayed; zero-latency configuration is required");
-    avcheck(av_write_trailer(mux.format), "Finish segment");
-    avio_flush(mux.io);
-    v.next_segment = sequence + 1;
-    return {std::move(mux.bytes), static_cast<int>(end - begin),
-            std::chrono::duration<double>(Clock::now() - started).count()};
 }
 } // namespace modeld

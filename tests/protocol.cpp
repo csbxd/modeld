@@ -60,6 +60,31 @@ int main() {
                 check(denied, "malformed or spliced timelines cannot select the wrong video");
             }
         }
+        {
+            const std::string original =
+                "https://peer.mcdn.bilivideo.cn:8082/upgcxcode/a/42-1-100024.m4s?peer";
+            const std::string backup =
+                "https://upos-sz-mirrorhw.bilivideo.com/upgcxcode/a/42-1-100024.m4s?cdn";
+            const auto sources = bilibili_video_sources(
+                original,
+                {{"dash",
+                  {{"video",
+                    Json::array(
+                        {{{"baseUrl", original},
+                          {"backupUrl",
+                           Json::array({backup, backup,
+                                        "https://attacker.example/upgcxcode/a/42-1-100024.m4s"})}},
+                         {{"baseUrl",
+                           "https://upos-sz-mirrorhw.bilivideo.com/upgcxcode/a/42-1-30064.m4s"}},
+                         {{"baseUrl", "https://upos-sz-mirrorhw.bilivideo.com/upgcxcode/a/"
+                                      "42-1-100023.m4s"}}})}}}});
+            check(sources == std::vector<std::string>({backup, original}),
+                  "CDN fallback preserves the exact encoding, deduplicates and rejects foreign "
+                  "hosts");
+            check(bilibili_video_sources(original, Json::object()) ==
+                      std::vector<std::string>({original}),
+                  "missing backup metadata preserves the original selection");
+        }
         auto file = std::filesystem::temp_directory_path() / ("modeld-test-" + random_id());
         {
             std::ofstream f(file);
@@ -84,7 +109,17 @@ int main() {
                     "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\nsegments/0.ts\n#EXT-X-ENDLIST\n",
                     "application/vnd.apple.mpegurl");
             });
-            upstream.Get(R"(/test/segments/([0-9]+)\.ts)", [](const auto &req, auto &res) {
+            std::atomic<int> attempts{0};
+            upstream.Get(R"(/test/segments/([0-9]+)\.ts)", [&](const auto &req, auto &res) {
+                if (req.matches[1] == "0" && ++attempts <= 2) {
+                    res.status = 503;
+                    res.set_content("temporary source failure", "text/plain");
+                    return;
+                }
+                if (req.matches[1] == "9") {
+                    res.status = 404;
+                    return;
+                }
                 res.set_content("segment-" + req.matches[1].str(), "video/MP2T");
             });
             int port = upstream.bind_to_any_port("127.0.0.1");
@@ -99,11 +134,17 @@ int main() {
                 base.erase(base.rfind('/') + 1);
                 auto first = client.Get(base + "segments/0.ts");
                 check(first && first->body == "segment-0", "proxy preserves segment bytes");
+                check(attempts == 3 && proxy.failure().empty(),
+                      "proxy recovers repeated transient HTTP errors without aborting playback");
                 check(proxy.buffered_ahead(0) >= 2, "proxy tracks completed video");
                 auto seek = client.Get(base + "segments/12.ts");
                 check(seek && seek->body == "segment-12", "proxy cancels stale prefetch on seek");
                 auto invalid = client.Get(base + "segments/99.ts");
                 check(invalid && invalid->status == 404, "proxy rejects out-of-range segments");
+                auto missing = client.Get(base + "segments/9.ts");
+                check(missing && missing->status == 503 &&
+                          proxy.failure().find("404") != std::string::npos,
+                      "terminal transfer errors retain the upstream HTTP status");
             }
             upstream.stop();
             listener.join();

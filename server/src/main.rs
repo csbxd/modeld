@@ -215,7 +215,12 @@ impl App {
         }
         let mut cache = s.cache.lock().unwrap();
         if let Some(entry) = cache.get(&sequence) {
-            return Ok(entry.clone());
+            if !matches!(&*entry.borrow(), Some(Err(_))) {
+                return Ok(entry.clone());
+            }
+            // A transient source error must not poison this segment for the
+            // lifetime of the session. Existing waiters still see that error.
+            cache.remove(&sequence);
         }
         let (tx, rx) = watch::channel(None);
         self.jobs
@@ -274,6 +279,8 @@ async fn models(State(app): State<Arc<App>>, headers: HeaderMap) -> Result<Json<
 #[derive(Deserialize)]
 struct CreateSession {
     source_url: String,
+    #[serde(default)]
+    source_backups: Vec<String>,
     #[serde(default)]
     source_headers: BTreeMap<String, String>,
     #[serde(default)]
@@ -336,6 +343,12 @@ impl CreateSession {
             return Err(ApiError::new(422, "This release targets 60 fps"));
         }
         source_url(&self.source_url)?;
+        if self.source_backups.len() > 8 {
+            return Err(ApiError::new(422, "Too many source backup URLs"));
+        }
+        for backup in &self.source_backups {
+            source_url(backup)?;
+        }
         self.http_headers()?;
         Ok(())
     }
@@ -358,15 +371,12 @@ async fn create(
     let qp = app.config.encoder_qp;
     let encoder = app.config.encoder.clone();
     let source_headers = body.http_headers()?;
+    let mut sources = vec![body.source_url];
+    sources.extend(body.source_backups);
+    let sources =
+        serde_json::to_string(&sources).map_err(|_| ApiError::new(422, "Invalid source URLs"))?;
     let video = tokio::task::spawn_blocking(move || {
-        Video::open(
-            backend,
-            &body.source_url,
-            &source_headers,
-            seconds,
-            qp,
-            &encoder,
-        )
+        Video::open(backend, &sources, &source_headers, seconds, qp, &encoder)
     })
     .await
     .map_err(|_| ApiError::new(500, "Source probe task failed"))??;
@@ -580,6 +590,7 @@ mod tests {
         assert_eq!(data["data"][0]["tf32"], false);
         let mut body = CreateSession {
             source_url: "http://100.123.1.2:9000/source/token".into(),
+            source_backups: Vec::new(),
             source_headers: BTreeMap::new(),
             model: None,
             task: Some("llm".into()),
@@ -621,6 +632,16 @@ mod tests {
             serde_json::from_value(json!({"source_url":"https://cdn.example/video"})).unwrap();
         assert!(old.validate().is_ok());
         assert_eq!(old.http_headers().unwrap(), "");
+        let mut fallback: CreateSession = serde_json::from_value(json!({
+            "source_url":"https://cdn.example/video.m4s",
+            "source_backups":["https://backup.example/video.m4s"]
+        }))
+        .unwrap();
+        assert!(fallback.validate().is_ok());
+        fallback.source_backups.push("file:///etc/passwd".into());
+        assert!(fallback.validate().is_err());
+        fallback.source_backups = vec!["https://backup.example/video.m4s".into(); 9];
+        assert!(fallback.validate().is_err());
     }
     #[test]
     fn unpredictable_capability_ids() {

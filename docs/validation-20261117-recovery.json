@@ -1,0 +1,25 @@
+{
+  "date": "2026-11-17",
+  "version": "0.1.5",
+  "test_mode": "Native model API on s8030, actual AV1 sample, loopback HTTP fault fixture",
+  "source": {"codec": "av1", "width": 1280, "height": 720, "fps": 30, "duration": 24},
+  "fault": {
+    "active_primary_connection_interrupted": true,
+    "primary_bytes_before_interruption": 262144,
+    "subsequent_primary_responses": 503,
+    "primary_requests": 4,
+    "backup_requests": 2,
+    "incomplete_source_packet_detected": true,
+    "source_reopened_and_segment_regenerated": true
+  },
+  "result": {
+    "http_status": 200,
+    "codec": "hevc",
+    "fps": 60,
+    "decoded_frames": 120,
+    "segment_start_seconds": 0,
+    "elapsed_seconds_including_cold_profile_and_recovery": 12.285213
+  },
+  "model": "RIFE 4.26 Heavy FP32",
+  "tf32": false
+}

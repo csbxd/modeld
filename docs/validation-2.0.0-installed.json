@@ -1,0 +1,381 @@
+{
+  "date": "2026-11-18",
+  "version": "2.0.0",
+  "release_commit": "2aa7bb3c6c105a17119f1608d020bb1db9537e74",
+  "source_archive_sha256": "650b1fc3e68b90f99abe6fede906727e063d14ee1ab09ed8e8e18c3657df965d",
+  "overlay_commit": "55d6581642f8cad448be9eee8d0fa3d8d17eb2ce",
+  "packages": {
+    "asa": {
+      "atom": "media-plugins/mpv-modeld-2.0.0::gentoo-cs",
+      "arch": "arm64",
+      "use_test": true,
+      "package_tests_passed": true
+    },
+    "s8030": {
+      "atom": "app-misc/modeld-2.0.0::gentoo-cs",
+      "arch": "amd64",
+      "use_test": true,
+      "package_tests_passed": true,
+      "systemd_active": true
+    }
+  },
+  "configuration": {
+    "client_migrated": true,
+    "server_migrated": true,
+    "credentials_retained": true,
+    "limits_retained": true,
+    "config_checks_passed": true
+  },
+  "legacy_v1_http_status": 404,
+  "mpv_patch_required": false,
+  "native": {
+    "version": "2.0.0",
+    "phase": "media",
+    "backend": "real TensorRT-RTX/CUDA/NVENC",
+    "cases": [
+      {
+        "mode": "combined",
+        "frames": 720,
+        "width": 320,
+        "height": 180,
+        "rate": "60/1",
+        "tracks": [
+          {
+            "id": 1,
+            "kind": "video",
+            "source": "video",
+            "source_index": 0,
+            "codec": "hevc",
+            "language": "",
+            "title": ""
+          },
+          {
+            "id": 1,
+            "kind": "audio",
+            "source": "video",
+            "source_index": 1,
+            "codec": "flac",
+            "language": "",
+            "title": ""
+          },
+          {
+            "id": 1,
+            "kind": "subtitle",
+            "source": "video",
+            "source_index": 2,
+            "codec": "ass",
+            "language": "",
+            "title": ""
+          }
+        ],
+        "retries": [],
+        "audio_packets_identical": true,
+        "audio_samples_identical": true,
+        "trimmed_tail_padding_samples": 0
+      },
+      {
+        "mode": "separate_audio",
+        "frames": 720,
+        "width": 320,
+        "height": 180,
+        "rate": "60/1",
+        "tracks": [
+          {
+            "id": 1,
+            "kind": "video",
+            "source": "video",
+            "source_index": 0,
+            "codec": "hevc",
+            "language": "",
+            "title": ""
+          },
+          {
+            "id": 1,
+            "kind": "audio",
+            "source": "audio",
+            "source_index": 0,
+            "codec": "aac",
+            "language": "und",
+            "title": ""
+          }
+        ],
+        "retries": [],
+        "audio_packets_identical": true,
+        "audio_samples_identical": true,
+        "trimmed_tail_padding_samples": 512
+      },
+      {
+        "mode": "landscape",
+        "frames": 120,
+        "width": 1920,
+        "height": 1080,
+        "rate": "60/1",
+        "tracks": [
+          {
+            "id": 1,
+            "kind": "video",
+            "source": "video",
+            "source_index": 0,
+            "codec": "hevc",
+            "language": "",
+            "title": ""
+          }
+        ],
+        "retries": []
+      },
+      {
+        "mode": "portrait",
+        "frames": 120,
+        "width": 1080,
+        "height": 1920,
+        "rate": "60/1",
+        "tracks": [
+          {
+            "id": 1,
+            "kind": "video",
+            "source": "video",
+            "source_index": 0,
+            "codec": "hevc",
+            "language": "",
+            "title": ""
+          }
+        ],
+        "retries": []
+      }
+    ],
+    "audio_backup_failures_observed": 2,
+    "interrupted_source_recovery": {
+      "backup_reads": 5,
+      "frames": 120
+    },
+    "passed": true
+  },
+  "player": {
+    "main_media": true,
+    "original_selection": {
+      "sid": 1,
+      "secondary_sid": 2,
+      "tracks": [
+        {
+          "id": 1,
+          "type": "video",
+          "ff_index": 0,
+          "selection": 0,
+          "selected": true
+        },
+        {
+          "id": 1,
+          "type": "audio",
+          "ff_index": 1,
+          "selection": 0,
+          "selected": true
+        },
+        {
+          "id": 1,
+          "type": "sub",
+          "ff_index": 2,
+          "selection": 0,
+          "selected": true
+        },
+        {
+          "id": 2,
+          "type": "sub",
+          "ff_index": 0,
+          "selection": 1,
+          "selected": true
+        }
+      ]
+    },
+    "tracks": [
+      {
+        "type": "video",
+        "codec": "hevc",
+        "external": false,
+        "selected": true
+      },
+      {
+        "type": "audio",
+        "codec": "flac",
+        "external": false,
+        "selected": true
+      },
+      {
+        "type": "sub",
+        "codec": "ass",
+        "external": false,
+        "selected": true
+      },
+      {
+        "type": "sub",
+        "codec": "ass",
+        "external": true,
+        "selected": true
+      }
+    ],
+    "native_backpressure": {
+      "user_pause": false,
+      "stopped_at": 3.8,
+      "audio_clock_stopped": true
+    },
+    "avsync": 0.000024,
+    "buffers_while_user_paused": true,
+    "cached_seeks": [
+      8,
+      2,
+      9,
+      3,
+      0,
+      7
+    ],
+    "cache_ranges": [
+      {
+        "start": 0,
+        "end": 11.983
+      }
+    ],
+    "original_restored": true,
+    "toggle_reuses_processed_chunks": true,
+    "deleted_external_subtitle_preserved": true,
+    "playlist_preserved": true,
+    "passed": true
+  },
+  "bilibili": {
+    "version": "2.0.0",
+    "headless": true,
+    "status_before": {
+      "protocol": 2,
+      "scheduler": {
+        "completed": 15,
+        "failed": 0,
+        "queue_capacity": 8,
+        "queued": 0,
+        "ready": true,
+        "rendering": 0
+      },
+      "sessions": {
+        "limit": 2,
+        "occupied": 0,
+        "published": 0
+      },
+      "version": "2.0.0"
+    },
+    "source": {
+      "codec": "av1",
+      "width": 852,
+      "height": 480
+    },
+    "output": {
+      "width": 852,
+      "height": 480,
+      "fps": 60.000004
+    },
+    "tracks": [
+      {
+        "type": "video",
+        "codec": "hevc",
+        "external": false,
+        "selected": true
+      },
+      {
+        "type": "audio",
+        "codec": "aac",
+        "external": false,
+        "selected": true
+      },
+      {
+        "type": "sub",
+        "codec": "null",
+        "external": true,
+        "selected": false
+      }
+    ],
+    "network_sample": {
+      "seconds": 2,
+      "modeld": {
+        "connections": 4,
+        "received_bytes": 5129223
+      },
+      "loopback": {
+        "connections": 2,
+        "received_bytes": 6172699
+      },
+      "other_https": {
+        "connections": 1,
+        "received_bytes": 0
+      }
+    },
+    "samples": [
+      {
+        "position": 31.033,
+        "avsync": 0.000011,
+        "cache_wait": false
+      },
+      {
+        "position": 32.033,
+        "avsync": 0.000008,
+        "cache_wait": false
+      },
+      {
+        "position": 33.033,
+        "avsync": 0.000004,
+        "cache_wait": false
+      },
+      {
+        "position": 34.033,
+        "avsync": 0.000006,
+        "cache_wait": false
+      },
+      {
+        "position": 35.033,
+        "avsync": 0.00001,
+        "cache_wait": false
+      },
+      {
+        "position": 36.033,
+        "avsync": 0.000006,
+        "cache_wait": false
+      },
+      {
+        "position": 37.033,
+        "avsync": 0.000003,
+        "cache_wait": false
+      },
+      {
+        "position": 38.033,
+        "avsync": 0.000006,
+        "cache_wait": false
+      }
+    ],
+    "clock": {
+      "wall_seconds": 8.011107801000001,
+      "advance_seconds": 8.033000000000001,
+      "max_abs_avsync": 0.000011
+    },
+    "seeks": [
+      120,
+      30
+    ],
+    "original_restored": true,
+    "playlist_preserved": true,
+    "user_pause_preserved": true,
+    "status_during": {
+      "protocol": 2,
+      "scheduler": {
+        "completed": 73,
+        "failed": 1,
+        "queue_capacity": 8,
+        "queued": 0,
+        "ready": true,
+        "rendering": 0
+      },
+      "sessions": {
+        "limit": 2,
+        "occupied": 1,
+        "published": 1
+      },
+      "version": "2.0.0"
+    },
+    "passed": true
+  },
+  "passed": true
+}

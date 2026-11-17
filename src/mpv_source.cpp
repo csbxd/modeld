@@ -1,5 +1,6 @@
-#include "modeld/common.hpp"
+#include "modeld/input.hpp"
 #include <charconv>
+#include <httplib.h>
 #include <map>
 #include <string_view>
 
@@ -83,9 +84,6 @@ bool http(const std::string &url) {
     return url.starts_with("http://") || url.starts_with("https://");
 }
 } // namespace
-std::string resolved_video_url(const std::string &opened, const Json &selected) {
-    return resolved_track_url(opened, selected, "video");
-}
 std::string resolved_track_url(const std::string &opened, const Json &selected,
                                const std::string &kind) {
     if (http(opened))

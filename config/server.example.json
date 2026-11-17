@@ -1,16 +1,20 @@
 {
-  "listen": "127.0.0.1",
-  "port": 8765,
-  "public_url": "http://s8030.netbird.cloud:8765",
+  "listen": "127.0.0.1:8765",
   "token_file": "/etc/modeld/api.token",
-  "model_path": "/usr/share/modeld/models/rife-4.26-heavy.onnx",
-  "cache_dir": "/var/cache/modeld",
-  "max_sessions": 2,
-  "queue_capacity": 8,
-  "segment_seconds": 2,
-  "cache_segments": 12,
-  "session_ttl_seconds": 120,
-  "source_timeout_seconds": 30,
-  "encoder_qp": 18,
-  "encoder": "hevc_nvenc"
+  "inference": {
+    "model_file": "/usr/share/modeld/models/rife-4.26-heavy.onnx",
+    "cache_directory": "/var/cache/modeld"
+  },
+  "limits": {
+    "sessions": 2,
+    "queued_segments": 8,
+    "cached_segments": 12,
+    "lease_seconds": 120,
+    "source_timeout_seconds": 30
+  },
+  "output": {
+    "segment_seconds": 2,
+    "codec": "hevc",
+    "qp": 18
+  }
 }

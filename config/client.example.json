@@ -1,7 +1,8 @@
 {
-  "api": "http://s8030.netbird.cloud:8765",
-  "api_address": "",
-  "token_file": "/etc/modeld/api.token",
-  "callback_address": "auto",
-  "media_cache_bytes": 268435456
+  "endpoint": "http://s8030.netbird.cloud:8765",
+  "token_file": "/home/YOUR_USER/.config/modeld/api.token",
+  "connect_address": "",
+  "source_bind": "auto",
+  "cache_bytes": 268435456,
+  "request_timeout_seconds": 45
 }

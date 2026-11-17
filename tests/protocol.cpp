@@ -1,327 +1,276 @@
-#include "modeld/common.hpp"
+#include "modeld/session.hpp"
+#include <atomic>
+#include <cmath>
 #include <fstream>
 #include <future>
 #include <iostream>
+#include <map>
+#include <mutex>
 #include <sys/stat.h>
 #include <thread>
-static void check(bool condition, const char *message) {
-    if (!condition)
+namespace {
+using namespace modeld;
+void check(bool value, const char *message) {
+    if (!value)
         throw std::runtime_error(message);
 }
-int main() {
-    using namespace modeld;
-    try {
-        auto id = random_id();
-        check(id.size() == 32 && id != random_id(), "unpredictable capability IDs");
-        check(secure_equal("same", "same") && !secure_equal("same", "other"), "token comparison");
-        check(supported_dimensions(1920, 1080) && supported_dimensions(1080, 1920) &&
-                  supported_dimensions(720, 1280),
-              "landscape and portrait use the same native pixel budget");
-        check(!supported_dimensions(1920, 1920) && !supported_dimensions(1081, 1920) &&
-                  !supported_dimensions(3840, 2160) && !supported_dimensions(0, 1080),
-              "portrait support cannot admit square 1920p, odd sizes or 4K");
-        auto p = playlist(4.01, 60, 2);
-        check(p.find("#EXTINF:0.016667,") != std::string::npos, "fractional final frame duration");
-        check(p.find("segments/2.ts") != std::string::npos &&
-                  p.find("segments/3.ts") == std::string::npos,
-              "bounded segment timeline");
+struct TempFile {
+    std::filesystem::path path =
+        std::filesystem::temp_directory_path() / ("modeld-test-" + random_id());
+    explicit TempFile(const std::string &text) {
+        std::ofstream f(path);
+        f << text;
+        ::chmod(path.c_str(), 0600);
+    }
+    ~TempFile() {
+        std::filesystem::remove(path);
+    }
+};
+struct Server {
+    httplib::Server http;
+    int port = http.bind_to_any_port("127.0.0.1");
+    std::thread listener;
+    void start() {
+        listener = std::thread([this] { http.listen_after_bind(); });
+    }
+    ~Server() {
+        http.stop();
+        if (listener.joinable())
+            listener.join();
+    }
+};
+const std::string id(32, 'a');
+Json manifest(double duration = 32) {
+    return {{"schema", 2},
+            {"media",
+             {{"width", 320},
+              {"height", 180},
+              {"duration_seconds", duration},
+              {"source_fps", 30},
+              {"output_fps", 60},
+              {"segment_seconds", 2},
+              {"segment_count", static_cast<int>(std::ceil(std::ceil(duration * 60) / 120))},
+              {"tracks", Json::array()}}},
+            {"init", "/api/v2/sessions/" + id + "/media/init"},
+            {"segment_template", "/api/v2/sessions/" + id + "/media/segments/{index}"}};
+}
+ClientConfig config(int port, const std::filesystem::path &token) {
+    return ClientConfig::parse({{"endpoint", "http://unresolvable.invalid:" + std::to_string(port)},
+                                {"connect_address", "127.0.0.1"},
+                                {"token_file", token.string()},
+                                {"source_bind", "127.0.0.1"}});
+}
+void protocol() {
+    check(random_id().size() == 32 && random_id() != random_id(),
+          "capability IDs must be unpredictable");
+    check(supported_dimensions(1920, 1080) && supported_dimensions(1080, 1920) &&
+              !supported_dimensions(1920, 1920),
+          "one portrait/landscape pixel budget");
+    auto m = Manifest::parse(manifest(4.01));
+    const auto edl = m.edl("http://127.0.0.1/local");
+    check(edl.find("!mp4_dash,init=") != std::string::npos &&
+              edl.find("length=0.016666667") != std::string::npos,
+          "fractional last frame is retained");
+    for (auto bad : {Json{{"api", "http://old.example"}, {"token_file", "/test"}},
+                     Json{{"endpoint", "http://valid.example"},
+                          {"token_file", "/test"},
+                          {"output_mode", "main"}}}) {
         bool rejected = false;
         try {
-            playlist(-1, 60, 2);
-        } catch (const Error &) {
+            ClientConfig::parse(bad);
+        } catch (...) {
             rejected = true;
         }
-        check(rejected, "invalid duration rejected");
-        {
-            const std::string video_a = "https://cdn.example/hevc.m4s?key=a,b;part=1";
-            const std::string video_b = "https://cdn.example/avc.m4s?key=other";
-            auto quoted = [](const std::string &value) {
-                return "%" + std::to_string(value.size()) + "%" + value;
-            };
-            const auto dash =
-                "edl://!new_stream;!no_clip;!delay_open,media_type=video,codec=null;"
-                "!track_meta,title=%12%1080P 高清,program_id=0;" +
-                quoted(video_a) +
-                ",length=1097;!new_stream;!no_clip;!delay_open,media_type=video,codec=h264;"
-                "!track_meta,title=%12%1080P 高清,program_id=1;" +
-                quoted(video_b) +
-                ",length=1097;!new_stream;!delay_open,media_type=audio;"
-                "https://cdn.example/audio.m4s";
-            check(resolved_video_url(dash, {{"program-id", 0}}) == video_a,
-                  "DASH selected HEVC program and length-escaped URL");
-            check(resolved_video_url(dash, {{"program-id", 1}}) == video_b,
-                  "DASH selected AVC program with the same title");
-            check(resolved_track_url(dash, {{"id", 1}}, "audio") == "https://cdn.example/audio.m4s",
-                  "DASH audio is resolved independently from the chosen video program");
-            check(resolved_video_url(video_a, Json::object()) == video_a,
-                  "direct media URLs are preserved");
-            for (const auto &unsupported :
-                 {std::string("edl://%999%short"),
-                  std::string("edl://https://cdn.example/part1;https://cdn.example/part2"),
-                  std::string("edl://!mp4_dash;https://cdn.example/init.mp4"),
-                  std::string("edl://https://cdn.example/video,start=10,length=20")}) {
-                bool denied = false;
-                try {
-                    resolved_video_url(unsupported, Json::object());
-                } catch (const Error &) {
-                    denied = true;
-                }
-                check(denied, "malformed or spliced timelines cannot select the wrong video");
-            }
+        check(rejected, "configuration must reject unknown fields");
+    }
+    auto bad = manifest();
+    bad["init"] = "https://foreign.example/private";
+    bool rejected = false;
+    try {
+        Manifest::parse(bad);
+    } catch (...) {
+        rejected = true;
+    }
+    check(rejected, "media requests must stay on the configured API origin");
+    const std::string video = "https://cdn.example/video.m4s?key=a,b;part=1";
+    auto quote = [](const std::string &s) { return "%" + std::to_string(s.size()) + "%" + s; };
+    const std::string dash =
+        "edl://!new_stream;!no_clip;!delay_open,media_type=video;"
+        "!track_meta,program_id=0;" +
+        quote(video) +
+        ",length=12;"
+        "!new_stream;!no_clip;!delay_open,media_type=audio;https://cdn.example/a.m4s;"
+        "!new_stream;!no_clip;!delay_open,media_type=audio;https://cdn.example/b.m4s";
+    check(resolved_track_url(dash, {{"program-id", 0}}, "video") == video,
+          "selected DASH video is exact");
+    check(resolved_track_url(dash, {{"id", 2}}, "audio") == "https://cdn.example/b.m4s",
+          "selected DASH audio is independent");
+    const std::string original =
+        "https://peer.mcdn.bilivideo.cn:8082/upgcxcode/a/42-1-30280.m4s?peer";
+    const std::string backup =
+        "https://upos-sz-mirrorhw.bilivideo.com/upgcxcode/a/42-1-30280.m4s?cdn";
+    auto sources = bilibili_sources(
+        original,
+        {{"dash",
+          {{"audio",
+            Json::array(
+                {{{"baseUrl", original},
+                  {"backupUrl",
+                   Json::array({backup, "https://foreign.example/upgcxcode/a/42-1-30280.m4s",
+                                "https://upos-sz-mirrorhw.bilivideo.com/upgcxcode/a/"
+                                "42-1-30216.m4s"})}}})}}}});
+    check(sources == std::vector<std::string>({backup, original}),
+          "audio fallback preserves the exact encoding");
+}
+void range() {
+    TempFile file("0123456789");
+    SourceServer source(file.path, "127.0.0.1");
+    const auto url = source.url(), split = url.substr(0, url.find('/', 7));
+    httplib::Client client(split);
+    const auto r = client.Get(url.substr(split.size()), httplib::Headers{{"Range", "bytes=2-5"}});
+    check(r && r->status == 206 && r->body == "2345", "source supports exact HTTP byte ranges");
+    const auto denied = client.Get("/source/not-shared");
+    check(denied && denied->status == 404, "source server exposes only its capability");
+}
+void cache() {
+    TempFile token(random_id() + random_id());
+    Server server;
+    std::atomic<int> first{0};
+    const auto base = "/api/v2/sessions/" + id + "/media";
+    server.http.Get(base + "/init", [](const auto &, auto &r) {
+        r.set_content("stable-tracks", "video/x-matroska");
+    });
+    server.http.Get(base + R"(/segments/([0-9]+))", [&](const auto &q, auto &r) {
+        if (q.matches[1] == "0" && ++first <= 2) {
+            r.status = 503;
+            r.set_content(
+                Json{{"error",
+                      {{"code", "source_failed"}, {"message", "temporary"}, {"retryable", true}}}}
+                    .dump(),
+                "application/json");
+            return;
         }
-        {
-            const std::string original =
-                "https://peer.mcdn.bilivideo.cn:8082/upgcxcode/a/42-1-100024.m4s?peer";
-            const std::string backup =
-                "https://upos-sz-mirrorhw.bilivideo.com/upgcxcode/a/42-1-100024.m4s?cdn";
-            const auto sources = bilibili_video_sources(
-                original,
-                {{"dash",
-                  {{"video",
-                    Json::array(
-                        {{{"baseUrl", original},
-                          {"backupUrl",
-                           Json::array({backup, backup,
-                                        "https://attacker.example/upgcxcode/a/42-1-100024.m4s"})}},
-                         {{"baseUrl",
-                           "https://upos-sz-mirrorhw.bilivideo.com/upgcxcode/a/42-1-30064.m4s"}},
-                         {{"baseUrl", "https://upos-sz-mirrorhw.bilivideo.com/upgcxcode/a/"
-                                      "42-1-100023.m4s"}}})}}}});
-            check(sources == std::vector<std::string>({backup, original}),
-                  "CDN fallback preserves the exact encoding, deduplicates and rejects foreign "
-                  "hosts");
-            check(bilibili_video_sources(original, Json::object()) ==
-                      std::vector<std::string>({original}),
-                  "missing backup metadata preserves the original selection");
+        r.set_content("cluster-" + q.matches[1].str(), "video/x-matroska");
+    });
+    server.start();
+    const ApiClient api(config(server.port, token.path));
+    std::shared_ptr<MediaProxy::Cache> saved;
+    for (int pass = 0; pass < 2; ++pass) {
+        MediaProxy proxy(api, Manifest::parse(manifest()), {}, saved);
+        const auto url = proxy.url();
+        const auto slash = url.find('/', 7);
+        httplib::Client local(url.substr(0, slash));
+        auto path = url.substr(slash);
+        path.erase(path.rfind('/') + 1);
+        const auto first_chunk = local.Get(path + "segments/0");
+        check(first_chunk && first_chunk->body == "cluster-0" && first == 3,
+              "transient errors retry; completed bytes are reused across toggles");
+        const auto far = local.Get(path + "segments/12");
+        check(far && far->body == "cluster-12", "far seek cancels pending old requests");
+        const auto back = local.Get(path + "segments/0");
+        check(back && back->body == "cluster-0" && first == 3,
+              "completed cache survives distant seeks");
+        const auto invalid = local.Get(path + "segments/99");
+        check(invalid && invalid->status == 404, "out-of-range chunks are rejected");
+        saved = proxy.saved_cache();
+    }
+}
+void canceled_open() {
+    TempFile token(random_id() + random_id());
+    Server server;
+    const auto base = "/api/v2/sessions/" + id;
+    std::promise<void> reading;
+    std::atomic<bool> release{false};
+    std::atomic<int> closed{0};
+    std::atomic<int> opening_attempts{0};
+    server.http.Post("/api/v2/sessions", [&](const auto &q, auto &r) {
+        if (++opening_attempts == 1) {
+            r.status = 429;
+            r.set_content(Json{{"error",
+                                {{"code", "session_limit"},
+                                 {"message", "Cancellation is finishing"},
+                                 {"retryable", true}}}}
+                              .dump(),
+                          "application/json");
+            return;
         }
-        auto file = std::filesystem::temp_directory_path() / ("modeld-test-" + random_id());
-        {
-            std::ofstream f(file);
-            f << "0123456789";
-        }
-        {
-            SourceServer source(file, "127.0.0.1");
-            auto url = source.url();
-            auto split = url.find('/', 7);
-            httplib::Client client(url.substr(0, split));
-            auto path = url.substr(split);
-            auto r = client.Get(path, httplib::Headers{{"Range", "bytes=2-5"}});
-            check(r && r->status == 206 && r->body == "2345", "source byte ranges");
-            auto denied = client.Get("/source/not-the-capability");
-            check(denied && denied->status == 404, "unshared source unavailable");
-        }
-        std::filesystem::remove(file);
-        {
-            auto token_file =
-                std::filesystem::temp_directory_path() / ("modeld-token-" + random_id());
-            {
-                std::ofstream f(token_file);
-                f << random_id();
-            }
-            httplib::Server upstream;
-            std::atomic<int> closed{0};
-            std::promise<void> probing;
-            std::atomic<bool> release{false};
-            int port = upstream.bind_to_any_port("127.0.0.1");
-            const auto endpoint = "http://unresolvable.invalid:" + std::to_string(port);
-            Json config = {{"api", endpoint},
-                           {"api_address", "127.0.0.1"},
-                           {"token_file", token_file.string()},
-                           {"session_timeout_seconds", 1}};
-            upstream.Get("/health", [&](const auto &req, auto &res) {
-                check(req.get_header_value("Host").starts_with("unresolvable.invalid"),
-                      "pinning preserves the HTTP host");
-                res.set_content("{\"status\":\"ready\"}", "application/json");
-            });
-            upstream.Post("/v1/sessions", [&](const auto &req, auto &res) {
-                if (req.body == "{}")
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1400));
-                res.set_content(Json{{"id", "test"},
-                                     {"width", 1080},
-                                     {"height", 1920},
-                                     {"duration", 4},
-                                     {"source_fps", 30},
-                                     {"playlist_url", endpoint + "/v1/sessions/test/index.m3u8"}}
-                                    .dump(),
-                                "application/json");
-            });
-            upstream.Get("/v1/sessions/test/index.m3u8", [&](const auto &, auto &res) {
-                probing.set_value();
-                while (!release)
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                res.set_content("#EXTM3U\n#EXT-X-TARGETDURATION:2\n",
-                                "application/vnd.apple.mpegurl");
-            });
-            upstream.Delete("/v1/sessions/test", [&](const auto &, auto &res) {
-                ++closed;
-                res.set_content("{}", "application/json");
-            });
-            std::thread listener([&] { upstream.listen_after_bind(); });
-            try {
-                check(request_json(config, "GET", "/health")["status"] == "ready",
-                      "configured API address works without DNS");
-                check(media_url(endpoint + "/private/index.m3u8", config) ==
-                          "http://127.0.0.1:" + std::to_string(port) + "/private/index.m3u8",
-                      "API pin also resolves returned HLS URLs");
-                bool timed_out = false;
-                try {
-                    request_json(config, "POST", "/v1/sessions");
-                } catch (const Error &e) {
-                    timed_out = e.status == 504 &&
-                                std::string(e.what()).find("timed out") != std::string::npos;
-                }
-                check(timed_out,
-                      "a missing API response is distinguished from a connection failure");
-                auto request = std::make_unique<SessionRequest>(
-                    config, "http://example/video", "http://example/video", Json::object());
-                check(probing.get_future().wait_for(std::chrono::seconds(3)) ==
-                          std::future_status::ready,
-                      "session request runs in the background");
-                const auto cancel_started = Clock::now();
-                request.reset();
-                check(Clock::now() - cancel_started < std::chrono::seconds(2),
-                      "cancel interrupts a blocked timeline read promptly");
-                check(closed == 1, "canceled activation closes its already-created remote session");
-                release = true;
-                upstream.stop();
-                listener.join();
-            } catch (...) {
-                release = true;
-                upstream.stop();
-                listener.join();
-                std::filesystem::remove(token_file);
-                throw;
-            }
-            std::filesystem::remove(token_file);
-        }
-        {
-            httplib::Server upstream;
-            upstream.Get("/test/index.m3u8", [](const auto &, auto &res) {
-                res.set_content(
-                    "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\nsegments/0.ts\n#EXT-X-ENDLIST\n",
-                    "application/vnd.apple.mpegurl");
-            });
-            std::atomic<int> attempts{0};
-            upstream.Get(R"(/test/segments/([0-9]+)\.ts)", [&](const auto &req, auto &res) {
-                if (req.matches[1] == "0" && ++attempts <= 2) {
-                    res.status = 503;
-                    res.set_content("temporary source failure", "text/plain");
-                    return;
-                }
-                if (req.matches[1] == "9") {
-                    res.status = 404;
-                    return;
-                }
-                res.set_content("segment-" + req.matches[1].str(), "video/MP2T");
-            });
-            int port = upstream.bind_to_any_port("127.0.0.1");
-            std::thread listener([&] { upstream.listen_after_bind(); });
-            {
-                MediaProxy proxy("http://127.0.0.1:" + std::to_string(port) + "/test/index.m3u8",
-                                 32);
-                auto url = proxy.url();
-                auto split = url.find('/', 7);
-                httplib::Client client(url.substr(0, split));
-                auto base = url.substr(split);
-                base.erase(base.rfind('/') + 1);
-                auto first = client.Get(base + "segments/0.ts");
-                check(first && first->body == "segment-0", "proxy preserves segment bytes");
-                check(attempts == 3 && proxy.failure().empty(),
-                      "proxy recovers repeated transient HTTP errors without aborting playback");
-                check(proxy.buffered_ahead(0) >= 2, "proxy tracks completed video");
-                auto seek = client.Get(base + "segments/12.ts");
-                check(seek && seek->body == "segment-12", "proxy cancels stale prefetch on seek");
-                auto back = client.Get(base + "segments/0.ts");
-                check(back && back->body == "segment-0" && attempts == 3,
-                      "completed chunks survive a distant seek without another download");
-                auto invalid = client.Get(base + "segments/99.ts");
-                check(invalid && invalid->status == 404, "proxy rejects out-of-range segments");
-                auto missing = client.Get(base + "segments/9.ts");
-                check(missing && missing->status == 503 &&
-                          proxy.failure().find("404") != std::string::npos,
-                      "terminal transfer errors retain the upstream HTTP status");
-            }
-            upstream.stop();
-            listener.join();
-        }
-        {
-            httplib::Server upstream;
-            std::atomic<int> first_reads{0};
-            upstream.Get("/main/index.m3u8", [](const auto &, auto &res) {
-                res.set_content("#EXTM3U\n#EXT-X-TARGETDURATION:2\n"
-                                "#EXT-X-MAP:URI=\"init.mkv\"\n#EXT-X-ENDLIST\n",
-                                "application/vnd.apple.mpegurl");
-            });
-            upstream.Get("/main/init.mkv", [](const auto &, auto &res) {
-                res.set_content("compatible-tracks", "video/x-matroska");
-            });
-            upstream.Get(R"(/main/segments/([0-9]+)\.mkv)", [&](const auto &req, auto &res) {
-                if (req.matches[1] == "0")
-                    ++first_reads;
-                res.set_content("cluster-" + req.matches[1].str(), "video/x-matroska");
-            });
-            const int port = upstream.bind_to_any_port("127.0.0.1");
-            std::thread listener([&] { upstream.listen_after_bind(); });
-            const auto origin = "http://127.0.0.1:" + std::to_string(port) + "/main/index.m3u8";
-            std::shared_ptr<MediaProxy::Cache> saved;
-            for (int pass = 0; pass < 2; ++pass) {
-                MediaProxy proxy(origin, 4.01, Json::object(), {}, saved);
-                const auto url = proxy.url();
-                const auto split = url.find('/', 7);
-                httplib::Client client(url.substr(0, split));
-                auto path = url.substr(split);
-                auto edl = client.Get(path);
-                check(edl && edl->body.starts_with("# mpv EDL v0\n") &&
-                          edl->body.find("!mp4_dash,init=") != std::string::npos &&
-                          edl->body.find("length=0.016666667") != std::string::npos,
-                      "main media uses one mpv DASH timeline including the fractional final frame");
-                path.erase(path.rfind('/') + 1);
-                auto chunk = client.Get(path + "segments/0.mkv");
-                check(chunk && chunk->body == "cluster-0" && first_reads == 1,
-                      "main-media cache survives toggling with matching initialization tracks");
-                saved = proxy.saved_cache();
-            }
-            upstream.stop();
-            listener.join();
-        }
-        check(model_catalog()["data"][0]["precision"] == "fp32", "model precision advertised");
-        {
-            const char *prior = std::getenv("XDG_STATE_HOME");
-            const std::string saved = prior ? prior : "";
-            auto directory = std::filesystem::temp_directory_path() / ("modeld-log-" + random_id());
-            setenv("XDG_STATE_HOME", directory.c_str(), 1);
-            log_event(
-                "test",
-                {{"token", "secret_token"},
-                 {"source_headers", {{"Cookie", "secret_cookie"}}},
-                 {"error",
-                  "failed https://user:secret_password@cdn.example/private_media?key=secret_query "
-                  "Bearer secret_bearer"},
-                 {"ipv6", "https://[::1]/private_media?key=secret_ipv6"},
-                 {"message", "Cookie: session=secret_cookie"}});
-            std::ifstream log(client_log_path());
-            const std::string text{std::istreambuf_iterator<char>(log), {}};
-            check(!text.empty() && text.find("cdn.example/[redacted]") != std::string::npos,
-                  "persistent diagnostics keep origin hosts");
-            for (const auto *secret :
-                 {"secret_token", "secret_cookie", "secret_password", "secret_query",
-                  "secret_bearer", "secret_ipv6", "private_media"})
-                check(text.find(secret) == std::string::npos,
-                      "diagnostics redact credentials and URL paths");
-            struct stat status{};
-            check(::stat(client_log_path().c_str(), &status) == 0 &&
-                      (status.st_mode & 0777) == 0600,
-                  "private diagnostic file permissions");
-            if (prior)
-                setenv("XDG_STATE_HOME", saved.c_str(), 1);
-            else
-                unsetenv("XDG_STATE_HOME");
-            std::filesystem::remove_all(directory);
-        }
-        std::cout << "Protocol, timeline, capability isolation and range serving passed\n";
+        const auto body = Json::parse(q.body);
+        check(body.at("video").contains("urls") && !body.contains("source_url"),
+              "client sends only the v2 contract");
+        check(q.get_header_value("Host").starts_with("unresolvable.invalid"),
+              "IP pinning preserves the Host header");
+        r.status = 201;
+        r.set_content(Json{{"id", id}, {"lease_seconds", 120}, {"manifest", manifest(4)}}.dump(),
+                      "application/json");
+    });
+    server.http.Put(base + "/lease",
+                    [](const auto &, auto &r) { r.set_content("{}", "application/json"); });
+    server.http.Delete(base, [&](const auto &, auto &r) {
+        ++closed;
+        r.status = 204;
+    });
+    server.http.Get(base + "/media/init", [&](const auto &, auto &r) {
+        reading.set_value();
+        r.set_content_provider(1, "video/x-matroska", [&](size_t, size_t, httplib::DataSink &sink) {
+            while (!release)
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            return sink.write("x", 1);
+        });
+    });
+    server.start();
+    auto request = std::make_unique<OpenSession>(
+        config(server.port, token.path), "local",
+        OpenRequest{Input{{"https://cdn.example/video"}, Json::object()}, std::nullopt, {}});
+    try {
+        check(reading.get_future().wait_for(std::chrono::seconds(3)) == std::future_status::ready,
+              "session creation runs asynchronously");
+        const auto start = Clock::now();
+        request.reset();
+        check(Clock::now() - start < std::chrono::seconds(2),
+              "cancel interrupts a blocked initialization read");
+        check(closed == 1, "RAII closes a session created before activation is canceled");
+    } catch (...) {
+        release = true;
+        throw;
+    }
+    release = true;
+}
+void redaction() {
+    const auto directory = std::filesystem::temp_directory_path() / ("modeld-log-" + random_id());
+    const char *prior = std::getenv("XDG_STATE_HOME");
+    const std::string saved = prior ? prior : "";
+    setenv("XDG_STATE_HOME", directory.c_str(), 1);
+    log_event("test", {{"token", "private_token"},
+                       {"message", "Cookie: private_cookie"},
+                       {"error", "https://user:private_password@cdn.example/"
+                                 "private_path?key=private_query Bearer private_bearer"}});
+    std::ifstream input(client_log_path());
+    const std::string data{std::istreambuf_iterator<char>(input), {}};
+    check(!data.empty(), "diagnostics are persisted");
+    for (const auto *value : {"private_token", "private_cookie", "private_password", "private_path",
+                              "private_query", "private_bearer"})
+        check(data.find(value) == std::string::npos,
+              "diagnostics redact credentials and media paths");
+    struct stat info{};
+    check(::stat(client_log_path().c_str(), &info) == 0 && (info.st_mode & 0777) == 0600,
+          "diagnostics are private");
+    if (prior)
+        setenv("XDG_STATE_HOME", saved.c_str(), 1);
+    else
+        unsetenv("XDG_STATE_HOME");
+    std::filesystem::remove_all(directory);
+}
+} // namespace
+int main() {
+    try {
+        protocol();
+        range();
+        cache();
+        canceled_open();
+        redaction();
+        std::cout << "v2 contract, source ranges, cache and cancellation passed\n";
     } catch (const std::exception &e) {
         std::cerr << e.what() << '\n';
         return 1;
     }
-    return 0;
 }

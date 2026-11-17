@@ -1,110 +1,170 @@
-#include "modeld/common.hpp"
+#include "modeld/session.hpp"
+#include <condition_variable>
 #include <mutex>
 #include <thread>
-
 namespace modeld {
-struct SessionRequest::Impl {
-    Json config;
-    mutable std::mutex mutex;
-    std::string current_stage = "source.alternatives";
-    SessionResult result;
-    std::exception_ptr error;
-    bool done = false, taken = false;
+struct RemoteSession::Impl {
+    ApiClient api;
+    std::string id;
+    int lease_seconds;
+    std::mutex mutex;
+    std::condition_variable_any condition;
+    bool paused = false, changed = true;
     std::jthread worker;
-
-    void stage(const char *value) {
-        std::lock_guard lock(mutex);
-        current_stage = value;
+    Impl(ApiClient client, std::string identifier, int lease)
+        : api(std::move(client)), id(std::move(identifier)), lease_seconds(lease) {
+        worker = std::jthread([this](std::stop_token stop) {
+            while (!stop.stop_requested()) {
+                bool value;
+                {
+                    std::unique_lock lock(mutex);
+                    condition.wait_for(lock, stop,
+                                       std::chrono::seconds(std::max(1, lease_seconds / 3)),
+                                       [&] { return changed; });
+                    if (stop.stop_requested())
+                        return;
+                    value = paused;
+                    changed = false;
+                }
+                try {
+                    api.request("PUT", std::string(api_prefix) + "/sessions/" + id + "/lease",
+                                {{"paused", value}}, stop);
+                } catch (const std::exception &e) {
+                    if (!stop.stop_requested())
+                        log_event("lease.failed", {{"error", e.what()}});
+                }
+            }
+        });
     }
+    ~Impl() {
+        worker.request_stop();
+        condition.notify_all();
+        if (worker.joinable())
+            worker.join();
+        try {
+            api.request("DELETE", std::string(api_prefix) + "/sessions/" + id);
+        } catch (const std::exception &e) {
+            log_event("session.close.failed", {{"error", e.what()}});
+        }
+    }
+};
+RemoteSession::RemoteSession(ApiClient api, const Json &created)
+    : info(SessionInfo::parse(created)) {
+    impl = std::make_unique<Impl>(std::move(api), info.id, info.lease_seconds);
+}
+RemoteSession::~RemoteSession() {
+    impl.reset();
+    stream.reset();
+}
+void RemoteSession::paused(bool value) {
+    {
+        std::lock_guard lock(impl->mutex);
+        if (impl->paused == value)
+            return;
+        impl->paused = value;
+        impl->changed = true;
+    }
+    impl->condition.notify_all();
+}
+struct OpenSession::Impl {
+    mutable std::mutex mutex;
+    std::string stage = "input.resolve";
+    std::unique_ptr<RemoteSession> result;
+    std::exception_ptr error;
+    bool done = false;
+    std::jthread worker;
     ~Impl() {
         worker.request_stop();
         if (worker.joinable())
             worker.join();
-        // Cancellation may race a successful POST or playlist download. Close
-        // any session that was created but never transferred to the player.
-        if (!taken && result.info.is_object() && result.info.contains("id")) {
-            try {
-                log_event("session.abandon");
-                request_json(config, "DELETE",
-                             "/v1/sessions/" + result.info.at("id").get<std::string>());
-            } catch (const std::exception &e) {
-                log_event("session.abandon.failed", {{"error", e.what()}});
-            }
-        }
+    }
+    void phase(std::string value) {
+        std::lock_guard lock(mutex);
+        stage = std::move(value);
     }
 };
-
-SessionRequest::SessionRequest(const Json &config, const std::string &webpage,
-                               const std::string &source, const Json &headers, const Json &options,
-                               std::shared_ptr<MediaProxy::Cache> cache)
+OpenSession::OpenSession(ClientConfig config, std::string webpage, OpenRequest request,
+                         std::shared_ptr<MediaProxy::Cache> cache)
     : impl(std::make_unique<Impl>()) {
-    impl->config = config;
     auto *state = impl.get();
-    state->worker = std::jthread([state, webpage, source, headers, options,
-                                  cache](std::stop_token stop) {
+    state->worker = std::jthread([state, config = std::move(config), webpage = std::move(webpage),
+                                  request = std::move(request),
+                                  cache = std::move(cache)](std::stop_token stop) mutable {
+        ApiClient api(config);
+        Json created;
+        std::unique_ptr<RemoteSession> session;
         try {
-            auto urls = resolve_video_sources(webpage, source, stop);
+            request.video.urls = resolve_sources(webpage, request.video.urls.at(0), stop);
+            if (request.audio)
+                request.audio->urls = resolve_sources(webpage, request.audio->urls.at(0), stop);
             if (stop.stop_requested())
-                throw Error(499, "Session creation canceled");
-            state->stage("session.create");
-            Json backups = Json::array(), names = Json::array();
-            for (size_t n = 1; n < urls.size(); ++n)
-                backups.push_back(urls[n]);
-            for (const auto &[name, value] : headers.items())
-                names.push_back(name);
-            log_event("session.create", {{"source", log_url(urls.front())},
-                                         {"backup_count", backups.size()},
-                                         {"header_names", names}});
-            auto body = options;
-            if (body.contains("audio_source_url")) {
-                const auto audio = resolve_video_sources(webpage, body["audio_source_url"], stop);
-                body["audio_source_url"] = audio.front();
+                throw Error(499, "Session opening canceled", "canceled");
+            state->phase("session.open");
+            const auto capacity_deadline =
+                Clock::now() + std::chrono::seconds(config.request_timeout_seconds);
+            for (;;) {
+                try {
+                    created = api.request("POST", std::string(api_prefix) + "/sessions",
+                                          request.json(), stop);
+                    break;
+                } catch (const Error &error) {
+                    if (error.code != "session_limit" || !error.retryable ||
+                        Clock::now() >= capacity_deadline)
+                        throw;
+                    state->phase("session.wait_capacity");
+                    std::mutex mutex;
+                    std::condition_variable_any condition;
+                    std::unique_lock lock(mutex);
+                    condition.wait_for(lock, stop, std::chrono::milliseconds(250),
+                                       [] { return false; });
+                    if (stop.stop_requested())
+                        throw Error(499, "Session opening canceled", "canceled");
+                }
             }
-            body.update({{"model", model_id},
-                         {"task", "frame_interpolation"},
-                         {"source_url", urls.front()},
-                         {"source_backups", backups},
-                         {"source_headers", headers},
-                         {"target_fps", 60}});
-            state->result.info = request_json(state->config, "POST", "/v1/sessions", body, stop);
-            if (options.value("output_mode", std::string{}) == "main" &&
-                (!state->result.info.contains("media") ||
-                 state->result.info["media"].value("output_mode", std::string{}) != "main"))
-                throw Error(409, "完整主媒体播放需要 modeld 0.1.7 或更新的服务端");
+            session = std::make_unique<RemoteSession>(api, created);
             if (stop.stop_requested())
-                throw Error(499, "Session creation canceled");
-            const auto &info = state->result.info;
-            log_event("session.created", {{"width", info.at("width")},
-                                          {"height", info.at("height")},
-                                          {"source_fps", info.at("source_fps")},
-                                          {"duration", info.at("duration")}});
-            state->stage("media.timeline");
-            state->result.media = std::make_unique<MediaProxy>(
-                info.at("playlist_url").get<std::string>(), info.at("duration").get<double>(),
-                state->config, stop, cache);
+                throw Error(499, "Session opening canceled", "canceled");
+            state->phase("stream.initialize");
+            session->stream =
+                std::make_unique<MediaProxy>(api, session->info.manifest, stop, cache);
+            {
+                std::lock_guard lock(state->mutex);
+                state->result = std::move(session);
+            }
         } catch (...) {
             state->error = std::current_exception();
+            if (!session && created.is_object() && created.contains("id") &&
+                created["id"].is_string()) {
+                const auto id = created["id"].get<std::string>();
+                if (id.size() == 32 &&
+                    id.find_first_not_of("0123456789abcdef") == std::string::npos)
+                    try {
+                        api.request("DELETE", std::string(api_prefix) + "/sessions/" + id);
+                    } catch (...) {
+                    }
+            }
         }
         std::lock_guard lock(state->mutex);
         state->done = true;
     });
 }
-SessionRequest::~SessionRequest() = default;
-bool SessionRequest::ready() const {
+OpenSession::~OpenSession() = default;
+bool OpenSession::ready() const {
     std::lock_guard lock(impl->mutex);
     return impl->done;
 }
-std::string SessionRequest::stage() const {
+std::string OpenSession::stage() const {
     std::lock_guard lock(impl->mutex);
-    return impl->current_stage;
+    return impl->stage;
 }
-SessionResult SessionRequest::take() {
+std::unique_ptr<RemoteSession> OpenSession::take() {
     std::lock_guard lock(impl->mutex);
-    if (!impl->done || impl->taken)
-        throw Error(409, "Session creation is not ready");
+    if (!impl->done)
+        throw Error(409, "Session is not ready");
     if (impl->error)
         std::rethrow_exception(impl->error);
-    impl->taken = true;
+    if (!impl->result)
+        throw Error(409, "Session was already taken");
     return std::move(impl->result);
 }
 } // namespace modeld

@@ -5,10 +5,6 @@
 extern "C" {
 #endif
 typedef struct {
-    int width, height;
-    double duration, source_fps;
-} ModeldVideoInfo;
-typedef struct {
     const uint8_t *data;
     size_t length;
     int frames;
@@ -19,16 +15,15 @@ void *modeld_context_create(const char *model, const char *cache);
 void modeld_context_free(void *context);
 void *modeld_cancel_token_create(void);
 void modeld_cancel_token_set(void *token);
+int modeld_cancel_token_is_set(void *token);
 void modeld_cancel_token_free(void *token);
-void *modeld_video_open(void *context, const char *sources_json, const char *source_headers,
-                        int segment_seconds, int qp, const char *encoder,
-                        int source_timeout_seconds, void *cancel_token, const char *media_options,
-                        ModeldVideoInfo *info);
-const char *modeld_video_metadata(void *video);
-int modeld_video_header(void *video, ModeldSegment *result);
-void modeld_video_cancel(void *video);
-void modeld_video_free(void *video);
-int modeld_video_render(void *video, int64_t sequence, ModeldSegment *result);
+void *modeld_stream_open(void *context, const char *request_json, const char *settings_json,
+                         void *cancel_token);
+const char *modeld_stream_description(void *stream);
+int modeld_stream_init(void *stream, ModeldSegment *result);
+int modeld_stream_render(void *stream, uint64_t index, ModeldSegment *result);
+void modeld_stream_cancel(void *stream);
+void modeld_stream_free(void *stream);
 void modeld_segment_free(ModeldSegment *result);
 const char *modeld_last_error(void);
 int modeld_last_status(void);

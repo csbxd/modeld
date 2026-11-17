@@ -1,24 +1,20 @@
 [package]
 name = "modeld"
-version = "0.1.7"
+version = "2.0.0"
 edition = "2021"
 rust-version = "1.88"
 license = "MIT"
 description = "Bounded GPU model scheduling and native frame interpolation API"
 repository = "https://github.com/csbxd/modeld"
 
-[features]
-default = ["native"]
-native = []
-
 [dependencies]
-axum = "=0.8.8"
+modeld-protocol = { path = "../protocol" }
+axum = { version = "=0.8.8", default-features = false, features = ["http1", "json", "tokio"] }
 getrandom = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 subtle = "2.6"
 tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
-url = "2.5"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

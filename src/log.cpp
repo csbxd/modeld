@@ -1,4 +1,4 @@
-#include "modeld/common.hpp"
+#include "modeld/core.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
@@ -72,7 +72,7 @@ Json clean(Json value) {
             std::transform(key.begin(), key.end(), key.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             if (key.find("token") != std::string::npos || key.find("cookie") != std::string::npos ||
-                key.find("authorization") != std::string::npos || key == "source_headers")
+                key.find("authorization") != std::string::npos || key == "headers")
                 item = "<redacted>";
             else
                 item = clean(std::move(item));

@@ -2,12 +2,9 @@ fn main() {
     println!("cargo:rerun-if-env-changed=MODELD_NATIVE_LIB_DIR");
     println!("cargo:rerun-if-env-changed=TENSORRT_LIB_DIR");
     println!("cargo:rerun-if-env-changed=CUDA_LIB_DIR");
-    if std::env::var_os("CARGO_FEATURE_NATIVE").is_none() {
-        return;
-    }
     let native = std::env::var("MODELD_NATIVE_LIB_DIR")
         .expect("Build the CMake MODELD_SERVER target, then set MODELD_NATIVE_LIB_DIR");
-    for library in ["modeld_native", "modeld_rife"] {
+    for library in ["modeld_native", "modeld_rife", "modeld_core"] {
         println!("cargo:rerun-if-changed={native}/lib{library}.a");
     }
     let trt = std::env::var("TENSORRT_LIB_DIR").unwrap_or("/opt/tensorrt-rtx/lib".into());
@@ -15,7 +12,7 @@ fn main() {
     for directory in [native, trt, cuda] {
         println!("cargo:rustc-link-search=native={directory}");
     }
-    for library in ["modeld_native", "modeld_rife"] {
+    for library in ["modeld_native", "modeld_rife", "modeld_core"] {
         println!("cargo:rustc-link-lib=static={library}");
     }
     for library in [

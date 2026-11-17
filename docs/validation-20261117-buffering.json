@@ -1,0 +1,335 @@
+{
+  "date": "2026-11-17",
+  "version": "0.1.1",
+  "client": "asa, original user mpv configuration with null video/audio outputs",
+  "server": "s8030, installed systemd service running as modeld",
+  "source": "Sintel trailer, native 1920x1080, 24 fps",
+  "output": "HEVC NVENC QP18, 60 fps, original local AAC audio",
+  "sampling": "Two-second intervals; samples 25 onward follow a gap between probe runs",
+  "max_audio_video_difference_seconds": 0.04797699999999949,
+  "max_dropped_frames": 0,
+  "paused_samples": 23,
+  "playing_samples": 17,
+  "samples": [
+    {
+      "sample": 0,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 1,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 2,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 3,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 4,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 5,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 6,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 7,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 8,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 9,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 10,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 11,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 12,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 13,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 14,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 15,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 16,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 17,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 18,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 19,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 20,
+      "video": 0.016667,
+      "audio": null,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 21,
+      "video": 1.333333,
+      "audio": 1.366222,
+      "pause": false,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 22,
+      "video": 3.400000,
+      "audio": 3.370604,
+      "pause": false,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 23,
+      "video": 4.483333,
+      "audio": 4.457177,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 24,
+      "video": 4.483333,
+      "audio": 4.457177,
+      "pause": true,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 25,
+      "video": 8.166667,
+      "audio": 8.134487,
+      "pause": false,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 26,
+      "video": 10.166667,
+      "audio": 10.136784,
+      "pause": false,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 27,
+      "video": 12.166667,
+      "audio": 12.142123,
+      "pause": false,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 28,
+      "video": 14.166667,
+      "audio": 14.146029,
+      "pause": false,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 29,
+      "video": 16.166667,
+      "audio": 16.149175,
+      "pause": false,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 30,
+      "video": 18.166667,
+      "audio": 18.152573,
+      "pause": false,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 31,
+      "video": 20.166667,
+      "audio": 20.155697,
+      "pause": false,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 32,
+      "video": 22.208333,
+      "audio": 22.160356,
+      "pause": false,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 33,
+      "video": 24.166667,
+      "audio": 24.163671,
+      "pause": false,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 34,
+      "video": 26.208333,
+      "audio": 26.169517,
+      "pause": false,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 35,
+      "video": 28.208333,
+      "audio": 28.179426,
+      "pause": false,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 36,
+      "video": 30.208333,
+      "audio": 30.183303,
+      "pause": false,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 37,
+      "video": 32.208333,
+      "audio": 32.186603,
+      "pause": false,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 38,
+      "video": 34.208333,
+      "audio": 34.191066,
+      "pause": false,
+      "seeking": false,
+      "dropped": 0
+    },
+    {
+      "sample": 39,
+      "video": 36.208333,
+      "audio": 36.193959,
+      "pause": false,
+      "seeking": false,
+      "dropped": 0
+    }
+  ]
+}

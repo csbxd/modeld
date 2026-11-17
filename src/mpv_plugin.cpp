@@ -108,7 +108,7 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
         mpv_observe_property(m, 2, "seeking", MPV_FORMAT_FLAG);
         auto heartbeat = Clock::now();
         for (;;) {
-            auto *e = mpv_wait_event(m, 1.0);
+            auto *e = mpv_wait_event(m, 0.25);
             if (e->event_id == MPV_EVENT_SHUTDOWN)
                 break;
             try {
@@ -122,10 +122,12 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                     original_vid.clear();
                     enabled_entry.clear();
                 }
-                if (e->event_id == MPV_EVENT_CLIENT_MESSAGE) {
-                    auto *msg = static_cast<mpv_event_client_message *>(e->data);
-                    if (msg->num_args < 1 || std::string(msg->args[0]) != "toggle")
-                        continue;
+                auto *msg = e->event_id == MPV_EVENT_CLIENT_MESSAGE
+                                ? static_cast<mpv_event_client_message *>(e->data)
+                                : nullptr;
+                // Other scripts can broadcast continuously. Their messages must
+                // still pass through buffering and heartbeat maintenance.
+                if (msg && msg->num_args > 0 && std::string(msg->args[0]) == "toggle") {
                     if (!id.empty()) {
                         restore();
                         osd(m, "RIFE 已关闭，使用原视频轨");
@@ -186,15 +188,19 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                     double position = 0;
                     if (mpv_get_property(m, "time-pos", MPV_FORMAT_DOUBLE, &position) >= 0) {
                         auto ahead = media->buffered_ahead(position);
-                        if (!paused && !seeking && !buffering && ahead < 2.0 &&
-                            media_duration - position > 1.0) {
+                        const auto remaining = media_duration - position;
+                        // HLS probing and the HEVC decoder can retain more than
+                        // one segment before releasing frames. Downloaded bytes
+                        // alone therefore need a larger safety margin.
+                        if (!paused && !seeking && !buffering &&
+                            ahead < std::min(6.0, remaining) - 0.05 && remaining > 1.0) {
                             buffering = true;
                             paused = 1;
                             buffer_changed = true;
                             mpv_set_property(m, "pause", MPV_FORMAT_FLAG, &paused);
                             osd(m, "远端视频缓冲中…");
                         } else if (buffering &&
-                                   ahead >= std::min(4.0, media_duration - position) - 0.05) {
+                                   ahead >= std::min(8.0, remaining) - 0.05) {
                             buffering = false;
                             paused = 0;
                             buffer_changed = true;

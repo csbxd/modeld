@@ -102,7 +102,7 @@ Json request_json(const Json &c, const std::string &method, const std::string &p
                   const Json &body) {
     httplib::Client client(c.at("api").get<std::string>());
     client.set_connection_timeout(method == "DELETE" ? 3 : 10);
-    client.set_read_timeout(method == "DELETE" ? 3 : 180);
+    client.set_read_timeout(method == "DELETE" ? 3 : (path.ends_with("/heartbeat") ? 5 : 180));
     httplib::Headers headers = {
         {"Authorization", "Bearer " + read_token(c.at("token_file").get<std::string>())}};
     auto result = method == "POST"     ? client.Post(path, headers, body.dump(), "application/json")

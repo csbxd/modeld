@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(modeld VERSION 0.1.0 LANGUAGES CXX)
+project(modeld VERSION 0.1.1 LANGUAGES CXX)
 include(GNUInstallDirs)
 option(MODELD_CLIENT "Build modelctl and the native mpv plugin" ON)
 option(MODELD_SERVER "Build the CUDA/TensorRT-RTX server" OFF)

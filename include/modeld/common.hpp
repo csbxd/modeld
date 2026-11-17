@@ -24,6 +24,7 @@ Json request_json(const Json &config, const std::string &method, const std::stri
                   const Json &body = Json::object());
 std::string netbird_address();
 std::string media_url(const std::string &url);
+std::string resolved_video_url(const std::string &opened, const Json &selected_track);
 Json model_catalog(bool available = true);
 std::string playlist(double duration, int fps, int segment_seconds);
 struct SourceServer {

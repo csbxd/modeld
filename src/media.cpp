@@ -241,8 +241,9 @@ struct Video::Impl {
         avcheck(r, "Open NVENC encoder");
     }
 };
-Video::Video(const std::string &url, int seconds, int qp, const std::string &encoder,
-             RifeFactory factory, std::shared_ptr<std::atomic<bool>> cancelled)
+Video::Video(const std::string &url, const std::string &source_headers, int seconds, int qp,
+             const std::string &encoder, RifeFactory factory,
+             std::shared_ptr<std::atomic<bool>> cancelled)
     : impl(std::make_unique<Impl>(seconds, qp, encoder, std::move(factory), std::move(cancelled))) {
     if (!url.starts_with("http://") && !url.starts_with("https://"))
         throw Error(422, "source_url must be HTTP or HTTPS");
@@ -255,6 +256,8 @@ Video::Video(const std::string &url, int seconds, int qp, const std::string &enc
     av_dict_set(&options, "rw_timeout", "15000000", 0);
     av_dict_set(&options, "protocol_whitelist", "http,https,tcp,tls,crypto", 0);
     av_dict_set(&options, "user_agent", "modeld/0.1", 0);
+    if (!source_headers.empty())
+        av_dict_set(&options, "headers", source_headers.c_str(), 0);
     int r = avformat_open_input(&v.input, url.c_str(), nullptr, &options);
     av_dict_free(&options);
     avcheck(r, "Open source media");

@@ -24,6 +24,41 @@ int main() {
             rejected = true;
         }
         check(rejected, "invalid duration rejected");
+        {
+            const std::string video_a = "https://cdn.example/hevc.m4s?key=a,b;part=1";
+            const std::string video_b = "https://cdn.example/avc.m4s?key=other";
+            auto quoted = [](const std::string &value) {
+                return "%" + std::to_string(value.size()) + "%" + value;
+            };
+            const auto dash =
+                "edl://!new_stream;!no_clip;!delay_open,media_type=video,codec=null;"
+                "!track_meta,title=%12%1080P 高清,program_id=0;" +
+                quoted(video_a) +
+                ",length=1097;!new_stream;!no_clip;!delay_open,media_type=video,codec=h264;"
+                "!track_meta,title=%12%1080P 高清,program_id=1;" +
+                quoted(video_b) +
+                ",length=1097;!new_stream;!delay_open,media_type=audio;"
+                "https://cdn.example/audio.m4s";
+            check(resolved_video_url(dash, {{"program-id", 0}}) == video_a,
+                  "DASH selected HEVC program and length-escaped URL");
+            check(resolved_video_url(dash, {{"program-id", 1}}) == video_b,
+                  "DASH selected AVC program with the same title");
+            check(resolved_video_url(video_a, Json::object()) == video_a,
+                  "direct media URLs are preserved");
+            for (const auto &unsupported :
+                 {std::string("edl://%999%short"),
+                  std::string("edl://https://cdn.example/part1;https://cdn.example/part2"),
+                  std::string("edl://!mp4_dash;https://cdn.example/init.mp4"),
+                  std::string("edl://https://cdn.example/video,start=10,length=20")}) {
+                bool denied = false;
+                try {
+                    resolved_video_url(unsupported, Json::object());
+                } catch (const Error &) {
+                    denied = true;
+                }
+                check(denied, "malformed or spliced timelines cannot select the wrong video");
+            }
+        }
         auto file = std::filesystem::temp_directory_path() / ("modeld-test-" + random_id());
         {
             std::ofstream f(file);

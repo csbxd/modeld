@@ -37,6 +37,7 @@ mod implementation {
         fn modeld_video_open(
             context: *mut c_void,
             url: *const c_char,
+            source_headers: *const c_char,
             seconds: c_int,
             qp: c_int,
             encoder: *const c_char,
@@ -100,17 +101,20 @@ mod implementation {
         pub fn open(
             backend: Arc<Backend>,
             url: &str,
+            source_headers: &str,
             seconds: i32,
             qp: i32,
             encoder: &str,
         ) -> Result<Arc<Self>, ApiError> {
             let u = cstring(url)?;
+            let headers = cstring(source_headers)?;
             let encoder = cstring(encoder)?;
             let mut info = Info::default();
             let ptr = NonNull::new(unsafe {
                 modeld_video_open(
                     backend.ptr.as_ptr(),
                     u.as_ptr(),
+                    headers.as_ptr(),
                     seconds,
                     qp,
                     encoder.as_ptr(),
@@ -168,6 +172,7 @@ mod implementation {
     impl Video {
         pub fn open(
             _: Arc<Backend>,
+            _: &str,
             _: &str,
             _: i32,
             _: i32,

@@ -45,6 +45,18 @@ modeld::Json tracks(mpv_handle *m) {
     mpv_free_node_contents(&n);
     return result;
 }
+modeld::Json node_property(mpv_handle *m, const char *name) {
+    mpv_node n{};
+    if (mpv_get_property(m, name, MPV_FORMAT_NODE, &n) < 0)
+        return nullptr;
+    auto value = node_json(n);
+    mpv_free_node_contents(&n);
+    return value;
+}
+std::string playing_entry(mpv_handle *m) {
+    auto position = property(m, "playlist-playing-pos");
+    return position.empty() ? "" : property(m, ("playlist/" + position + "/id").c_str());
+}
 void command(mpv_handle *m, std::initializer_list<std::string> values) {
     std::vector<const char *> a;
     for (auto &s : values)
@@ -88,7 +100,7 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
     };
     auto restore = [&] {
         try {
-            if (!original_vid.empty() && property(m, "playlist-entry-id") == enabled_entry)
+            if (!original_vid.empty() && playing_entry(m) == enabled_entry)
                 mpv_set_property_string(m, "vid", original_vid.c_str());
             for (auto &track : tracks(m))
                 if (track.value("type", "") == "video" &&
@@ -136,13 +148,13 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                     auto path = property(m, "path");
                     if (path.empty())
                         throw Error(422, "请先打开视频");
-                    auto entry = property(m, "playlist-entry-id");
-                    bool found = false;
+                    auto entry = playing_entry(m);
+                    Json selected;
                     for (auto &track : tracks(m))
                         if (track.value("type", "") == "video" && track.value("selected", false) &&
                             !track.value("albumart", false))
-                            found = true;
-                    if (!found)
+                            selected = track;
+                    if (selected.is_null())
                         throw Error(422, "当前文件没有可插帧的视频轨");
                     original_vid = property(m, "vid");
                     enabled_entry = entry;
@@ -152,9 +164,32 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                     mpv_set_property(m, "pause", MPV_FORMAT_FLAG, &pause);
                     osd(m, "正在连接 RIFE 插帧服务…");
                     std::string url;
-                    if (path.starts_with("http://") || path.starts_with("https://"))
-                        url = path;
-                    else {
+                    Json headers = Json::object();
+                    auto opened = property(m, "stream-open-filename");
+                    auto external = selected.value("external-filename", std::string{});
+                    if (!external.empty())
+                        opened = external;
+                    if (opened.starts_with("http://") || opened.starts_with("https://") ||
+                        opened.starts_with("edl://")) {
+                        url = resolved_video_url(opened, selected);
+                        auto fields = node_property(m, "http-header-fields");
+                        if (fields.is_array())
+                            for (const auto &field : fields) {
+                                auto value = field.get<std::string>();
+                                auto colon = value.find(':');
+                                if (colon != std::string::npos) {
+                                    auto start = value.find_first_not_of(" \t", colon + 1);
+                                    headers[value.substr(0, colon)] =
+                                        start == std::string::npos ? "" : value.substr(start);
+                                }
+                            }
+                        auto agent = property(m, "user-agent");
+                        auto referrer = property(m, "referrer");
+                        if (!agent.empty())
+                            headers["User-Agent"] = agent;
+                        if (!referrer.empty())
+                            headers["Referer"] = referrer;
+                    } else {
                         if (path.starts_with("file://"))
                             path.erase(0, 7);
                         auto address = config.value("callback_address", std::string("auto"));
@@ -166,9 +201,10 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                                                {{"model", model_id},
                                                 {"task", "frame_interpolation"},
                                                 {"source_url", url},
+                                                {"source_headers", headers},
                                                 {"target_fps", 60}});
                     id = result.at("id").get<std::string>();
-                    if (property(m, "playlist-entry-id") != entry)
+                    if (playing_entry(m) != entry)
                         throw Error(409, "播放文件已变化，请重新开启插帧");
                     media_duration = result.at("duration").get<double>();
                     media = std::make_unique<MediaProxy>(
@@ -199,8 +235,7 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                             buffer_changed = true;
                             mpv_set_property(m, "pause", MPV_FORMAT_FLAG, &paused);
                             osd(m, "远端视频缓冲中…");
-                        } else if (buffering &&
-                                   ahead >= std::min(8.0, remaining) - 0.05) {
+                        } else if (buffering && ahead >= std::min(8.0, remaining) - 0.05) {
                             buffering = false;
                             paused = 0;
                             buffer_changed = true;

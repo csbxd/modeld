@@ -1,0 +1,102 @@
+{
+  "date": "2026-11-17",
+  "version": "0.1.2",
+  "site": "bilibili.com",
+  "source": {
+    "width": 1920,
+    "height": 1080,
+    "codec": "hevc",
+    "fps": 30
+  },
+  "output": {
+    "codec": "hevc",
+    "fps": 60,
+    "model": "RIFE 4.26 Heavy FP32"
+  },
+  "preserved_tracks": [
+    "original AAC audio",
+    "original ASS subtitles"
+  ],
+  "test_mode": "asa original mpv configuration; null video/audio outputs; modeld candidate on s8030",
+  "sample_interval_seconds": 3,
+  "max_dropped_frames": 0,
+  "max_audio_video_difference_seconds": 0.03201599999999871,
+  "paused_samples": 0,
+  "paused_seek": {
+    "forward_seconds": 120.25,
+    "backward_seconds": 3.25,
+    "seeking_completed": true
+  },
+  "samples": [
+    {
+      "sample": 0,
+      "video": 0.016667,
+      "audio": 0.016603,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 1,
+      "video": 3.050000,
+      "audio": 3.020694,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 2,
+      "video": 6.050000,
+      "audio": 6.026505,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 3,
+      "video": 9.050000,
+      "audio": 9.028767,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 4,
+      "video": 12.050000,
+      "audio": 12.032286,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 5,
+      "video": 15.066667,
+      "audio": 15.041462,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 6,
+      "video": 18.066667,
+      "audio": 18.044785,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 7,
+      "video": 21.083333,
+      "audio": 21.051317,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 8,
+      "video": 24.083333,
+      "audio": 24.055055,
+      "pause": false,
+      "dropped": 0
+    },
+    {
+      "sample": 9,
+      "video": 27.083333,
+      "audio": 27.063514,
+      "pause": false,
+      "dropped": 0
+    }
+  ]
+}

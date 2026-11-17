@@ -275,6 +275,8 @@ async fn models(State(app): State<Arc<App>>, headers: HeaderMap) -> Result<Json<
 struct CreateSession {
     source_url: String,
     #[serde(default)]
+    source_headers: BTreeMap<String, String>,
+    #[serde(default)]
     model: Option<String>,
     #[serde(default)]
     task: Option<String>,
@@ -282,6 +284,44 @@ struct CreateSession {
     target_fps: Option<i32>,
 }
 impl CreateSession {
+    fn http_headers(&self) -> Result<String> {
+        if self.source_headers.len() > 16 {
+            return Err(ApiError::new(422, "Too many source HTTP headers"));
+        }
+        let mut result = String::new();
+        let mut seen = std::collections::HashSet::new();
+        for (name, value) in &self.source_headers {
+            let normalized = name.to_ascii_lowercase();
+            if !matches!(
+                normalized.as_str(),
+                "user-agent"
+                    | "referer"
+                    | "origin"
+                    | "cookie"
+                    | "authorization"
+                    | "accept"
+                    | "accept-language"
+                    | "x-forwarded-for"
+            ) || !seen.insert(normalized)
+                || axum::http::HeaderName::from_bytes(name.as_bytes()).is_err()
+                || axum::http::HeaderValue::from_str(value).is_err()
+                || value.len() > 8192
+            {
+                return Err(ApiError::new(
+                    422,
+                    "Invalid or unsupported source HTTP header",
+                ));
+            }
+            result.push_str(name);
+            result.push_str(": ");
+            result.push_str(value);
+            result.push_str("\r\n");
+        }
+        if result.len() > 16384 {
+            return Err(ApiError::new(422, "Source HTTP headers are too large"));
+        }
+        Ok(result)
+    }
     fn validate(&self) -> Result<()> {
         if self.model.as_deref().unwrap_or(MODEL) != MODEL {
             return Err(ApiError::new(404, "Unknown model"));
@@ -295,7 +335,9 @@ impl CreateSession {
         if self.target_fps.unwrap_or(60) != 60 {
             return Err(ApiError::new(422, "This release targets 60 fps"));
         }
-        source_url(&self.source_url)
+        source_url(&self.source_url)?;
+        self.http_headers()?;
+        Ok(())
     }
 }
 async fn create(
@@ -315,8 +357,16 @@ async fn create(
     let seconds = app.config.segment_seconds;
     let qp = app.config.encoder_qp;
     let encoder = app.config.encoder.clone();
+    let source_headers = body.http_headers()?;
     let video = tokio::task::spawn_blocking(move || {
-        Video::open(backend, &body.source_url, seconds, qp, &encoder)
+        Video::open(
+            backend,
+            &body.source_url,
+            &source_headers,
+            seconds,
+            qp,
+            &encoder,
+        )
     })
     .await
     .map_err(|_| ApiError::new(500, "Source probe task failed"))??;
@@ -530,6 +580,7 @@ mod tests {
         assert_eq!(data["data"][0]["tf32"], false);
         let mut body = CreateSession {
             source_url: "http://100.123.1.2:9000/source/token".into(),
+            source_headers: BTreeMap::new(),
             model: None,
             task: Some("llm".into()),
             target_fps: None,
@@ -544,6 +595,32 @@ mod tests {
         assert!(source_url("file:///etc/passwd").is_err());
         assert!(source_url("http://user:secret@host/video").is_err());
         assert!(source_url("http://100.123.1.2:1234/source/opaque").is_ok());
+    }
+    #[test]
+    fn source_headers_preserve_referer_without_request_injection() {
+        let mut body: CreateSession = serde_json::from_value(json!({
+            "source_url":"https://cdn.example/video.m4s",
+            "source_headers":{"Referer":"https://www.bilibili.com/", "User-Agent":"mpv-test"}
+        }))
+        .unwrap();
+        assert!(body.validate().is_ok());
+        let headers = body.http_headers().unwrap();
+        assert!(headers.contains("Referer: https://www.bilibili.com/\r\n"));
+        body.source_headers
+            .insert("Cookie".into(), "session=test\r\nHost: private".into());
+        assert!(body.validate().is_err());
+        body.source_headers.remove("Cookie");
+        body.source_headers
+            .insert("Host".into(), "other.example".into());
+        assert!(body.validate().is_err());
+        body.source_headers.remove("Host");
+        body.source_headers
+            .insert("referer".into(), "https://other.example/".into());
+        assert!(body.validate().is_err());
+        let old: CreateSession =
+            serde_json::from_value(json!({"source_url":"https://cdn.example/video"})).unwrap();
+        assert!(old.validate().is_ok());
+        assert_eq!(old.http_headers().unwrap(), "");
     }
     #[test]
     fn unpredictable_capability_ids() {

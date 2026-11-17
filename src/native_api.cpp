@@ -1,6 +1,7 @@
 #include "modeld/common.hpp"
 #include "modeld/media.hpp"
 #include "modeld/native.h"
+#include <algorithm>
 #include <map>
 #include <mutex>
 namespace {
@@ -28,8 +29,14 @@ struct Context {
         std::lock_guard lock(mutex);
         auto key = std::pair(w, h);
         if (!models.contains(key)) {
-            if (models.size() >= 4)
-                throw modeld::Error(429, "Maximum resident model profiles reached");
+            if (models.size() >= 4) {
+                auto unused = std::find_if(models.begin(), models.end(), [](const auto &entry) {
+                    return entry.second.use_count() == 1;
+                });
+                if (unused == models.end())
+                    throw modeld::Error(429, "All resident model profiles are active");
+                models.erase(unused);
+            }
             models[key] = std::make_shared<modeld::Rife>(model, cache, w, h);
         }
         return models.at(key);

@@ -1,0 +1,143 @@
+{
+  "date": "2026-11-17",
+  "server": "RTX 4080 SUPER / Gentoo / TensorRT-RTX 1.7.1.116",
+  "client": "asa / aarch64 / mpv 0.41 development",
+  "model": "rife-4.26-heavy-fp32",
+  "tf32": false,
+  "model_sha256": "990ceae958e3da49a112125fa2ba3d1bcc361e97012e609492e37f33527d7955",
+  "api_stream": {
+    "source": "sintel-trailer-1080p.mp4",
+    "resolution": [
+      1920,
+      1080
+    ],
+    "source_fps": 24.0,
+    "target_fps": 60,
+    "model": "rife-4.26-heavy-fp32",
+    "encoder": "hevc_nvenc",
+    "encoder_qp": 18,
+    "segments": [
+      {
+        "index": 0,
+        "frames": 120,
+        "render_seconds": 1.773141,
+        "http_seconds": 4.914025
+      },
+      {
+        "index": 1,
+        "frames": 120,
+        "render_seconds": 1.471701,
+        "http_seconds": 3.682198
+      },
+      {
+        "index": 2,
+        "frames": 120,
+        "render_seconds": 1.480649,
+        "http_seconds": 2.775860
+      },
+      {
+        "index": 3,
+        "frames": 120,
+        "render_seconds": 1.470147,
+        "http_seconds": 9.081949
+      },
+      {
+        "index": 4,
+        "frames": 120,
+        "render_seconds": 1.485204,
+        "http_seconds": 2.738345
+      },
+      {
+        "index": 5,
+        "frames": 120,
+        "render_seconds": 1.468467,
+        "http_seconds": 1.988849
+      },
+      {
+        "index": 6,
+        "frames": 120,
+        "render_seconds": 2.028195,
+        "http_seconds": 17.651454
+      },
+      {
+        "index": 7,
+        "frames": 120,
+        "render_seconds": 1.465670,
+        "http_seconds": 3.694004
+      }
+    ],
+    "wall_seconds": 46.644319,
+    "frames": 960,
+    "end_to_end_fps": 20.58128450755171,
+    "decoded_frames": 960,
+    "decoded_rate": "60/1"
+  },
+  "mpv": {
+    "renderer": "null (headless functional/timing verification)",
+    "transport": "4 persistent HTTP connections with bounded local prefetch",
+    "observed_seconds": 40,
+    "output_fps": 60,
+    "original_audio": true,
+    "playback": {
+      "samples": [
+        {
+          "video_time": 5.033333,
+          "audio_time": 5.004580,
+          "paused": false,
+          "dropped_frames": 0
+        },
+        {
+          "video_time": 10.033333,
+          "audio_time": 10.008093,
+          "paused": false,
+          "dropped_frames": 0
+        },
+        {
+          "video_time": 15.033333,
+          "audio_time": 15.011424,
+          "paused": false,
+          "dropped_frames": 0
+        },
+        {
+          "video_time": 20.033333,
+          "audio_time": 20.016662,
+          "paused": false,
+          "dropped_frames": 0
+        },
+        {
+          "video_time": 25.050000,
+          "audio_time": 25.020340,
+          "paused": false,
+          "dropped_frames": 0
+        },
+        {
+          "video_time": 30.050000,
+          "audio_time": 30.024719,
+          "paused": false,
+          "dropped_frames": 0
+        },
+        {
+          "video_time": 35.050000,
+          "audio_time": 35.027282,
+          "paused": false,
+          "dropped_frames": 0
+        },
+        {
+          "video_time": 40.050000,
+          "audio_time": 40.032302,
+          "paused": false,
+          "dropped_frames": 0
+        }
+      ],
+      "max_av_difference": 0.029659999999999798,
+      "any_pause": false,
+      "max_drop": 0
+    },
+    "paused_seek": {
+      "forward_seconds": 30.25,
+      "backward_seconds": 3.25,
+      "completed": true
+    }
+  },
+  "scope": "This validates the tested source and headless playback timing; it does not guarantee all sources, network conditions, or physical display refresh. The raw API test intentionally used a new HTTP connection per segment; the mpv transport avoids that slow-start penalty."
+}

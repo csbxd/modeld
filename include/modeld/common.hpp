@@ -34,4 +34,13 @@ struct SourceServer {
     std::string url() const;
     SourceServer(const SourceServer &) = delete;
 };
+struct MediaProxy {
+    struct Impl;
+    std::unique_ptr<Impl> impl;
+    MediaProxy(const std::string &remote_playlist, double duration);
+    ~MediaProxy();
+    std::string url() const;
+    double buffered_ahead(double position) const;
+    MediaProxy(const MediaProxy &) = delete;
+};
 } // namespace modeld

@@ -65,6 +65,10 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
     using namespace modeld;
     std::string id, original_vid, enabled_entry;
     std::unique_ptr<SourceServer> source;
+    std::unique_ptr<MediaProxy> media;
+    bool buffering = false, activating = false;
+    int activation_pause = 0;
+    double media_duration = 0;
     Json config;
     auto clear = [&] {
         if (!id.empty()) {
@@ -74,7 +78,13 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
             }
             id.clear();
         }
+        media.reset();
         source.reset();
+        if (buffering || activating) {
+            int pause = activating ? activation_pause : 0;
+            mpv_set_property(m, "pause", MPV_FORMAT_FLAG, &pause);
+        }
+        buffering = activating = false;
     };
     auto restore = [&] {
         try {
@@ -95,6 +105,7 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                     "Ctrl+Shift+i script-message-to " + name + " toggle\n", "default"});
         command(m, {"enable-section", "modeld", "allow-hide-cursor+allow-vo-dragging"});
         mpv_observe_property(m, 1, "pause", MPV_FORMAT_FLAG);
+        mpv_observe_property(m, 2, "seeking", MPV_FORMAT_FLAG);
         auto heartbeat = Clock::now();
         for (;;) {
             auto *e = mpv_wait_event(m, 1.0);
@@ -133,6 +144,10 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                         throw Error(422, "当前文件没有可插帧的视频轨");
                     original_vid = property(m, "vid");
                     enabled_entry = entry;
+                    mpv_get_property(m, "pause", MPV_FORMAT_FLAG, &activation_pause);
+                    activating = true;
+                    int pause = 1;
+                    mpv_set_property(m, "pause", MPV_FORMAT_FLAG, &pause);
                     osd(m, "正在连接 RIFE 插帧服务…");
                     std::string url;
                     if (path.starts_with("http://") || path.starts_with("https://"))
@@ -153,18 +168,46 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                     id = result.at("id").get<std::string>();
                     if (property(m, "playlist-entry-id") != entry)
                         throw Error(409, "播放文件已变化，请重新开启插帧");
+                    media_duration = result.at("duration").get<double>();
+                    media = std::make_unique<MediaProxy>(
+                        result.at("playlist_url").get<std::string>(), media_duration);
                     command(m,
-                            {"video-add", media_url(result.at("playlist_url").get<std::string>()),
-                             "select", "modeld RIFE 4.26 Heavy FP32"});
+                            {"video-add", media->url(), "select", "modeld RIFE 4.26 Heavy FP32"});
+                    activating = false;
+                    mpv_set_property(m, "pause", MPV_FORMAT_FLAG, &activation_pause);
                     osd(m, "RIFE 4.26 Heavy FP32 · 60 fps");
                     heartbeat = Clock::now();
                 }
-                if (!id.empty() && (Clock::now() - heartbeat > std::chrono::seconds(10) ||
-                                    e->event_id == MPV_EVENT_PROPERTY_CHANGE)) {
-                    int paused = 0;
+                bool buffer_changed = false;
+                int paused = 0, seeking = 0;
+                mpv_get_property(m, "pause", MPV_FORMAT_FLAG, &paused);
+                mpv_get_property(m, "seeking", MPV_FORMAT_FLAG, &seeking);
+                if (!id.empty() && media) {
+                    double position = 0;
+                    if (mpv_get_property(m, "time-pos", MPV_FORMAT_DOUBLE, &position) >= 0) {
+                        auto ahead = media->buffered_ahead(position);
+                        if (!paused && !seeking && !buffering && ahead < 2.0 &&
+                            media_duration - position > 1.0) {
+                            buffering = true;
+                            paused = 1;
+                            buffer_changed = true;
+                            mpv_set_property(m, "pause", MPV_FORMAT_FLAG, &paused);
+                            osd(m, "远端视频缓冲中…");
+                        } else if (buffering &&
+                                   ahead >= std::min(4.0, media_duration - position) - 0.05) {
+                            buffering = false;
+                            paused = 0;
+                            buffer_changed = true;
+                            mpv_set_property(m, "pause", MPV_FORMAT_FLAG, &paused);
+                        }
+                    }
+                }
+                if (!id.empty() &&
+                    (buffer_changed || Clock::now() - heartbeat > std::chrono::seconds(10) ||
+                     e->event_id == MPV_EVENT_PROPERTY_CHANGE)) {
                     mpv_get_property(m, "pause", MPV_FORMAT_FLAG, &paused);
                     request_json(config, "POST", "/v1/sessions/" + id + "/heartbeat",
-                                 {{"paused", paused != 0}});
+                                 {{"paused", paused != 0 && !buffering && seeking == 0}});
                     heartbeat = Clock::now();
                 }
             } catch (const std::exception &error) {

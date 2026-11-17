@@ -113,6 +113,11 @@ int main(int argc, char **argv) {
         const int w = std::stoi(argv[3]), h = std::stoi(argv[4]), pixels = w * h;
         const std::string label = argv[7];
         const bool export_output = std::string(argv[8]) == "--export";
+        const int optimization_level = std::getenv("MODELD_BENCH_OPT_LEVEL")
+                                           ? std::stoi(std::getenv("MODELD_BENCH_OPT_LEVEL"))
+                                           : 3;
+        require(optimization_level >= 0 && optimization_level <= 5,
+                "Builder optimization level must be 0..5");
         require(export_output || std::string(argv[8]) == "--no-export",
                 "Expected --export or --no-export");
         require(w > 0 && h > 0 && w % 2 == 0 && h % 2 == 0, "Invalid dimensions");
@@ -145,7 +150,8 @@ int main(int argc, char **argv) {
             std::to_string(NV_TENSORRT_PATCH) + "." + std::to_string(NV_TENSORRT_BUILD);
         auto plan_file =
             cache / (std::string(BENCH_BACKEND) + "-" + version + "-" + std::to_string(w) + "x" +
-                     std::to_string(h) + "-fp32-no-tf32-driver" + std::to_string(driver) + ".plan");
+                     std::to_string(h) + "-fp32-no-tf32-opt" + std::to_string(optimization_level) +
+                     "-driver" + std::to_string(driver) + ".plan");
         auto load_start = Clock::now();
         std::unique_ptr<nvinfer1::IRuntime> runtime(nvinfer1::createInferRuntime(logger));
         require(bool(runtime), "Cannot create inference runtime");
@@ -172,6 +178,9 @@ int main(int argc, char **argv) {
             network->getInput(0)->setDimensions(dimensions);
             std::unique_ptr<nvinfer1::IBuilderConfig> config(builder->createBuilderConfig());
             config->clearFlag(nvinfer1::BuilderFlag::kTF32);
+#ifndef TRT_MAJOR_RTX
+            config->setBuilderOptimizationLevel(optimization_level);
+#endif
             config->setMaxAuxStreams(0);
             config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE, 4ULL << 30);
             std::unique_ptr<nvinfer1::IHostMemory> compiled(
@@ -312,37 +321,39 @@ int main(int argc, char **argv) {
         }
         rusage usage{};
         getrusage(RUSAGE_SELF, &usage);
-        Json result = {{"backend", BENCH_BACKEND},
-                       {"sdk_version", version},
-                       {"model_sha256", sha},
-                       {"width", w},
-                       {"height", h},
-                       {"device", device.name},
-                       {"cuda_driver", driver},
-                       {"cuda_runtime", runtime_version},
-                       {"tf32", false},
-                       {"precision", "fp32"},
-                       {"workspace_bytes", 4ULL << 30},
-                       {"aux_streams", 0},
-                       {"execution_contexts", 2},
-                       {"cache_hit", cache_hit},
-                       {"engine_bytes", plan.size()},
-                       {"build_seconds", build_seconds},
-                       {"load_including_build_seconds", load_seconds},
-                       {"context_warmup_and_graph_capture_seconds", prepare_seconds},
-                       {"gpu_allocation_delta_bytes",
-                        static_cast<int64_t>(free_before) - static_cast<int64_t>(free_after)},
-                       {"gpu_free_before_bytes", free_before},
-                       {"gpu_free_after_bytes", free_after},
-                       {"pid", getpid()},
-                       {"cuda_graph", true},
-                       {"nvidia_tf32_override", std::getenv("NVIDIA_TF32_OVERRIDE")
-                                                    ? std::getenv("NVIDIA_TF32_OVERRIDE")
-                                                    : "unset"},
-                       {"process_peak_rss_kib", usage.ru_maxrss},
-                       {"label", label},
-                       {"trials", trials},
-                       {"wall_seconds", seconds(start)}};
+        Json result = {
+            {"backend", BENCH_BACKEND},
+            {"sdk_version", version},
+            {"model_sha256", sha},
+            {"width", w},
+            {"height", h},
+            {"device", device.name},
+            {"cuda_driver", driver},
+            {"cuda_runtime", runtime_version},
+            {"tf32", false},
+            {"precision", "fp32"},
+            {"workspace_bytes", 4ULL << 30},
+            {"aux_streams", 0},
+            {"builder_optimization_level",
+             std::string(BENCH_BACKEND) == "trt" ? Json(optimization_level) : Json("JIT default")},
+            {"execution_contexts", 2},
+            {"cache_hit", cache_hit},
+            {"engine_bytes", plan.size()},
+            {"build_seconds", build_seconds},
+            {"load_including_build_seconds", load_seconds},
+            {"context_warmup_and_graph_capture_seconds", prepare_seconds},
+            {"gpu_allocation_delta_bytes",
+             static_cast<int64_t>(free_before) - static_cast<int64_t>(free_after)},
+            {"gpu_free_before_bytes", free_before},
+            {"gpu_free_after_bytes", free_after},
+            {"pid", getpid()},
+            {"cuda_graph", true},
+            {"nvidia_tf32_override",
+             std::getenv("NVIDIA_TF32_OVERRIDE") ? std::getenv("NVIDIA_TF32_OVERRIDE") : "unset"},
+            {"process_peak_rss_kib", usage.ru_maxrss},
+            {"label", label},
+            {"trials", trials},
+            {"wall_seconds", seconds(start)}};
         auto result_file = output_dir / (label + ".json");
         std::ofstream out(result_file);
         out << result.dump(2) << '\n';

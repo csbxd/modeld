@@ -81,6 +81,17 @@ double ssim(const std::vector<double> &a, const std::vector<double> &b, int w, i
 } // namespace
 int main(int argc, char **argv) {
     try {
+        if (argc == 2 && std::string(argv[1]) == "--self-test") {
+            constexpr int width = 32, height = 32;
+            std::vector<double> a(width * height, 0.25), b(width * height, 0.75);
+            const double expected = (2 * .25 * .75 + .0001) / (.25 * .25 + .75 * .75 + .0001);
+            if (std::abs(ssim(a, a, width, height) - 1) > 1e-10 ||
+                std::abs(ssim(a, b, width, height) - expected) > 1e-10 ||
+                std::abs(psnr(.0001).get<double>() - 40) > 1e-12 || byte(.5f) != 128)
+                throw std::runtime_error("Analytical SSIM/PSNR/quantization test failed");
+            std::cout << "Analytical SSIM, PSNR and 8-bit quantization checks passed\n";
+            return 0;
+        }
         if (argc != 5)
             throw std::runtime_error("Usage: compare-output MANIFEST OUTPUTS REPORT SUMMARY");
         std::ifstream file(argv[1]);

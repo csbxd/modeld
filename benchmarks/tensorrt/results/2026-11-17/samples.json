@@ -1,0 +1,115 @@
+{
+  "conversion": "BT.709 limited YUV to full RGB24; no resizing",
+  "samples": [
+    {
+      "height": 1080,
+      "width": 1920,
+      "source_url": "https://media.xiph.org/video/derf/y4m/ducks_take_off_1080p50.y4m",
+      "id": "ducks_take_off_1080p50-30",
+      "rgb_file": "ducks_take_off_1080p50-30.rgb",
+      "first_frame": 30,
+      "reference_frame": 1,
+      "y4m_header": "YUV4MPEG2 W1920 H1080 F50:1 Ip A1:1",
+      "source_fps": 50
+    },
+    {
+      "reference_frame": 1,
+      "id": "ducks_take_off_1080p50-120",
+      "height": 1080,
+      "source_url": "https://media.xiph.org/video/derf/y4m/ducks_take_off_1080p50.y4m",
+      "first_frame": 120,
+      "rgb_file": "ducks_take_off_1080p50-120.rgb",
+      "width": 1920,
+      "y4m_header": "YUV4MPEG2 W1920 H1080 F50:1 Ip A1:1",
+      "source_fps": 50
+    },
+    {
+      "height": 1080,
+      "source_url": "https://media.xiph.org/video/derf/y4m/crowd_run_1080p50.y4m",
+      "rgb_file": "crowd_run_1080p50-30.rgb",
+      "id": "crowd_run_1080p50-30",
+      "reference_frame": 1,
+      "first_frame": 30,
+      "width": 1920,
+      "y4m_header": "YUV4MPEG2 W1920 H1080 F50:1 Ip A1:1",
+      "source_fps": 50
+    },
+    {
+      "first_frame": 120,
+      "height": 1080,
+      "id": "crowd_run_1080p50-120",
+      "width": 1920,
+      "source_url": "https://media.xiph.org/video/derf/y4m/crowd_run_1080p50.y4m",
+      "rgb_file": "crowd_run_1080p50-120.rgb",
+      "reference_frame": 1,
+      "y4m_header": "YUV4MPEG2 W1920 H1080 F50:1 Ip A1:1",
+      "source_fps": 50
+    },
+    {
+      "id": "park_joy_1080p50-30",
+      "width": 1920,
+      "first_frame": 30,
+      "height": 1080,
+      "reference_frame": 1,
+      "source_url": "https://media.xiph.org/video/derf/y4m/park_joy_1080p50.y4m",
+      "rgb_file": "park_joy_1080p50-30.rgb",
+      "y4m_header": "YUV4MPEG2 W1920 H1080 F50:1 Ip A1:1",
+      "source_fps": 50
+    },
+    {
+      "source_url": "https://media.xiph.org/video/derf/y4m/park_joy_1080p50.y4m",
+      "height": 1080,
+      "width": 1920,
+      "rgb_file": "park_joy_1080p50-120.rgb",
+      "first_frame": 120,
+      "reference_frame": 1,
+      "id": "park_joy_1080p50-120",
+      "y4m_header": "YUV4MPEG2 W1920 H1080 F50:1 Ip A1:1",
+      "source_fps": 50
+    },
+    {
+      "reference_frame": 1,
+      "source_url": "https://media.xiph.org/video/derf/y4m/FourPeople_1280x720_60.y4m",
+      "id": "FourPeople_1280x720_60-30",
+      "rgb_file": "FourPeople_1280x720_60-30.rgb",
+      "height": 720,
+      "first_frame": 30,
+      "width": 1280,
+      "y4m_header": "YUV4MPEG2 W1280 H720 F60:1 Ip A0:0 C420jpeg XYSCSS=420JPEG",
+      "source_fps": 60
+    },
+    {
+      "first_frame": 120,
+      "height": 720,
+      "width": 1280,
+      "rgb_file": "FourPeople_1280x720_60-120.rgb",
+      "reference_frame": 1,
+      "id": "FourPeople_1280x720_60-120",
+      "source_url": "https://media.xiph.org/video/derf/y4m/FourPeople_1280x720_60.y4m",
+      "y4m_header": "YUV4MPEG2 W1280 H720 F60:1 Ip A0:0 C420jpeg XYSCSS=420JPEG",
+      "source_fps": 60
+    },
+    {
+      "height": 720,
+      "first_frame": 30,
+      "width": 1280,
+      "reference_frame": 1,
+      "id": "720p50_parkrun_ter-30",
+      "rgb_file": "720p50_parkrun_ter-30.rgb",
+      "source_url": "https://media.xiph.org/video/derf/y4m/720p50_parkrun_ter.y4m",
+      "y4m_header": "YUV4MPEG2 W1280 H720 F50:1 Ip A1:1",
+      "source_fps": 50
+    },
+    {
+      "width": 1280,
+      "source_url": "https://media.xiph.org/video/derf/y4m/720p50_parkrun_ter.y4m",
+      "reference_frame": 1,
+      "rgb_file": "720p50_parkrun_ter-120.rgb",
+      "height": 720,
+      "first_frame": 120,
+      "id": "720p50_parkrun_ter-120",
+      "y4m_header": "YUV4MPEG2 W1280 H720 F50:1 Ip A1:1",
+      "source_fps": 50
+    }
+  ]
+}

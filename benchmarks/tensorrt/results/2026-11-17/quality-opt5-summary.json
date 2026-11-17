@@ -1,0 +1,9 @@
+{
+  "max_8bit_channel_difference": 1,
+  "max_abs": 0.0038084089756011963,
+  "max_changed_8bit_channels_fraction": 0.0014750514403292182,
+  "max_mae": 5.856948914154697e-06,
+  "min_cross_psnr_db": 91.2701416844775,
+  "min_cross_ssim_y": 0.9999995009559562,
+  "samples": 18
+}

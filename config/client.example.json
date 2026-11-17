@@ -1,0 +1,5 @@
+{
+  "api": "http://s8030.netbird.cloud:8765",
+  "token_file": "/etc/modeld/api.token",
+  "callback_address": "auto"
+}

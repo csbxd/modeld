@@ -1,0 +1,7 @@
+/build*/
+/target/
+*.plan
+*.token
+/config/server.json
+/config/client.json
+.env

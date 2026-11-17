@@ -1,0 +1,24 @@
+[Unit]
+Description=Model scheduling and frame interpolation API
+After=network-online.target netbird.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=modeld
+Group=modeld
+SupplementaryGroups=video render
+ExecStart=/usr/bin/modeld --config /etc/modeld/server.json
+Restart=on-failure
+RestartSec=5
+CacheDirectory=modeld modeld/cuda
+StateDirectory=modeld
+Environment=CUDA_CACHE_PATH=/var/cache/modeld/cuda
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

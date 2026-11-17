@@ -1,0 +1,20 @@
+#!/sbin/openrc-run
+
+description="GPU model scheduling and frame interpolation API"
+command="/usr/bin/modeld"
+command_args="--config /etc/modeld/server.json"
+command_user="modeld:modeld"
+command_background="yes"
+pidfile="/run/modeld.pid"
+output_log="/var/log/modeld/modeld.log"
+error_log="/var/log/modeld/modeld.log"
+export CUDA_CACHE_PATH="/var/cache/modeld/cuda"
+
+depend() {
+	need net
+	after netbird
+}
+
+start_pre() {
+	checkpath -d -m 0750 -o modeld:modeld /var/log/modeld /var/cache/modeld /var/cache/modeld/cuda /var/lib/modeld
+}

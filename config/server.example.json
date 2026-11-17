@@ -1,0 +1,15 @@
+{
+  "listen": "127.0.0.1",
+  "port": 8765,
+  "public_url": "http://s8030.netbird.cloud:8765",
+  "token_file": "/etc/modeld/api.token",
+  "model_path": "/usr/share/modeld/models/rife-4.26-heavy.onnx",
+  "cache_dir": "/var/cache/modeld",
+  "max_sessions": 2,
+  "queue_capacity": 8,
+  "segment_seconds": 2,
+  "cache_segments": 12,
+  "session_ttl_seconds": 120,
+  "encoder_qp": 18,
+  "encoder": "hevc_nvenc"
+}

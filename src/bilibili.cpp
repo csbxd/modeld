@@ -63,7 +63,7 @@ std::vector<std::string> bilibili_video_sources(const std::string &source, const
 }
 
 std::vector<std::string> resolve_video_sources(const std::string &webpage,
-                                               const std::string &source) {
+                                               const std::string &source, std::stop_token stop) {
     static const std::regex page(
         R"(^https?://(?:www\.)?bilibili\.com/video/(BV[0-9A-Za-z]+)(?:[/?#].*)?$)");
     static const std::regex file(R"(^([0-9]+)-[0-9]+-[0-9]+\.m4s$)");
@@ -78,6 +78,9 @@ std::vector<std::string> resolve_video_sources(const std::string &webpage,
         client.set_read_timeout(5);
         client.set_max_timeout(8000);
         client.set_payload_max_length(2 * 1024 * 1024);
+        std::stop_callback cancel_lookup(stop, [&] { client.stop(); });
+        if (stop.stop_requested())
+            return {source};
         auto response =
             client.Get("/x/player/playurl?bvid=" + page_match[1].str() +
                            "&cid=" + file_match[1].str() + "&fnval=4048&qn=127&fourk=1&try_look=1",

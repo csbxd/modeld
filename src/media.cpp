@@ -12,6 +12,7 @@ extern "C" {
 }
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <deque>
 #include <iostream>
 #include <limits>
@@ -100,11 +101,15 @@ struct Video::Impl {
     RifeFactory factory;
     std::shared_ptr<Rife> rife;
     std::shared_ptr<std::atomic<bool>> cancelled;
+    std::chrono::seconds source_timeout;
+    Clock::time_point deadline{}, attempt_deadline{};
+    const char *phase = "Source probe";
     std::shared_ptr<Image> first, last;
+    Frame rgb_frame;
     explicit Impl(int seconds, int quantizer, std::string codec, RifeFactory f,
-                  std::shared_ptr<std::atomic<bool>> c)
+                  std::shared_ptr<std::atomic<bool>> c, int timeout_seconds)
         : segment_seconds(seconds), qp(quantizer), encoder_name(std::move(codec)),
-          factory(std::move(f)), cancelled(std::move(c)) {}
+          factory(std::move(f)), cancelled(std::move(c)), source_timeout(timeout_seconds) {}
     ~Impl() {
         avcodec_free_context(&encoder);
         av_buffer_unref(&frames);
@@ -116,9 +121,24 @@ struct Video::Impl {
     void check() {
         if (cancelled->load())
             throw Error(410, "Interpolation session was closed");
+        if (deadline != Clock::time_point{} && Clock::now() >= deadline)
+            throw Error(504, std::string(phase) + " exceeded the total time limit of " +
+                                 std::to_string(source_timeout.count()) + " seconds");
+    }
+    bool interrupted() const {
+        const auto now = Clock::now();
+        return cancelled->load() || (deadline != Clock::time_point{} && now >= deadline) ||
+               (attempt_deadline != Clock::time_point{} && now >= attempt_deadline);
+    }
+    void sourcecheck(int value, const char *operation) {
+        check();
+        if (value < 0 && attempt_deadline != Clock::time_point{} &&
+            Clock::now() >= attempt_deadline)
+            throw SourceError(504, std::string(operation) + " timed out while reading the source");
+        modeld::sourcecheck(value, operation);
     }
     static int interrupt(void *opaque) {
-        return static_cast<Impl *>(opaque)->cancelled->load() ? 1 : 0;
+        return static_cast<Impl *>(opaque)->interrupted() ? 1 : 0;
     }
     std::shared_ptr<Image> read_frame() {
         auto frame = new_frame();
@@ -183,14 +203,27 @@ struct Video::Impl {
             frame->colorspace == AVCOL_SPC_BT709 ? SWS_CS_ITU709
             : frame->colorspace == AVCOL_SPC_BT470BG || frame->colorspace == AVCOL_SPC_SMPTE170M
                 ? SWS_CS_ITU601
-                : (info.width >= 1280 ? SWS_CS_ITU709 : SWS_CS_ITU601);
+                : (std::max(info.width, info.height) >= 1280 ? SWS_CS_ITU709 : SWS_CS_ITU601);
         const int *coefficients = sws_getCoefficients(colors);
         sws_setColorspaceDetails(sws, coefficients, frame->color_range == AVCOL_RANGE_JPEG,
                                  coefficients, 1, 0, 1 << 16, 1 << 16);
-        uint8_t *destination[] = {out->rgb.data(), nullptr, nullptr, nullptr};
-        int strides[] = {info.width * 3, 0, 0, 0};
-        avcheck(sws_scale(sws, frame->data, frame->linesize, 0, info.height, destination, strides),
+        if (!rgb_frame) {
+            rgb_frame = new_frame();
+            rgb_frame->format = AV_PIX_FMT_RGB24;
+            rgb_frame->width = info.width;
+            rgb_frame->height = info.height;
+            avcheck(av_frame_get_buffer(rgb_frame.get(), 64), "Allocate aligned RGB frame");
+        }
+        // swscale's SIMD converters can write beyond a packed row (24 bytes
+        // past the last row at width 1080 on x86). Let FFmpeg allocate aligned
+        // rows and padding, then copy the visible pixels to RIFE's packed input.
+        avcheck(sws_scale(sws, frame->data, frame->linesize, 0, info.height, rgb_frame->data,
+                          rgb_frame->linesize),
                 "Convert source to RGB");
+        for (int y = 0; y < info.height; ++y)
+            std::memcpy(out->rgb.data() + static_cast<size_t>(y) * info.width * 3,
+                        rgb_frame->data[0] + static_cast<size_t>(y) * rgb_frame->linesize[0],
+                        static_cast<size_t>(info.width) * 3);
         return out;
     }
     void seek(double time) {
@@ -244,9 +277,11 @@ struct Video::Impl {
             : video->duration != AV_NOPTS_VALUE ? video->duration * av_q2d(video->time_base)
                                                 : 0;
         const double fps = av_q2d(av_guess_frame_rate(input, video, nullptr));
-        if (p->width < 32 || p->height < 32 || p->width > 1920 || p->height > 1080 ||
-            p->width % 2 || p->height % 2)
-            throw Error(422, "This release supports even native dimensions up to 1920x1080");
+        if (!supported_dimensions(p->width, p->height))
+            throw Error(422,
+                        "Unsupported native dimensions " + std::to_string(p->width) + "x" +
+                            std::to_string(p->height) +
+                            "; even sizes from 32x32 up to 1920x1080 or 1080x1920 are supported");
         if (!std::isfinite(duration) || duration <= 0 || duration > 604800)
             throw Error(422, "A seekable video with a known duration is required");
         if (!std::isfinite(fps) || fps <= 0 || fps >= 60)
@@ -347,21 +382,29 @@ struct Video::Impl {
 };
 Video::Video(const std::vector<std::string> &sources, const std::string &source_headers,
              int seconds, int qp, const std::string &encoder, RifeFactory factory,
-             std::shared_ptr<std::atomic<bool>> cancelled)
-    : impl(std::make_unique<Impl>(seconds, qp, encoder, std::move(factory), std::move(cancelled))) {
+             std::shared_ptr<std::atomic<bool>> cancelled, int source_timeout_seconds)
+    : impl(std::make_unique<Impl>(seconds, qp, encoder, std::move(factory), std::move(cancelled),
+                                  source_timeout_seconds)) {
     if (sources.empty() || sources.size() > 9)
         throw Error(422, "One source and at most eight backup URLs are required");
     for (const auto &url : sources)
         if (!url.starts_with("http://") && !url.starts_with("https://"))
             throw Error(422, "source_url must be HTTP or HTTPS");
     auto &v = *impl;
+    if (source_timeout_seconds < 1 || source_timeout_seconds > 120)
+        throw Error(422, "Source timeout must be between 1 and 120 seconds");
+    v.deadline = Clock::now() + v.source_timeout;
     v.sources = sources;
     v.source_headers = source_headers;
     for (;;) {
         try {
+            // One stalled primary must leave time to try a healthy backup.
+            v.attempt_deadline = std::min(v.deadline, Clock::now() + std::chrono::seconds(10));
             v.open_source(v.source_codec == AV_CODEC_ID_NONE);
             break;
-        } catch (const SourceError &) {
+        } catch (const SourceError &e) {
+            std::cerr << "[modeld] Source probe failed: source " << v.source_index + 1 << '/'
+                      << v.sources.size() << ": " << e.what() << '\n';
             v.check();
             if (++v.source_index >= v.sources.size())
                 throw;
@@ -369,6 +412,7 @@ Video::Video(const std::vector<std::string> &sources, const std::string &source_
                       << '\n';
         }
     }
+    v.deadline = v.attempt_deadline = {};
 }
 Video::~Video() = default;
 MediaInfo Video::info() const {
@@ -377,6 +421,12 @@ MediaInfo Video::info() const {
 Segment Video::render(int64_t sequence) {
     auto started = Clock::now();
     auto &v = *impl;
+    v.phase = "Source segment";
+    v.deadline = Clock::now() + v.source_timeout;
+    struct DeadlineReset {
+        Impl &v;
+        ~DeadlineReset() { v.deadline = v.attempt_deadline = {}; }
+    } reset{v};
     v.check();
     int64_t begin = sequence * 60 * v.segment_seconds,
             total = static_cast<int64_t>(std::ceil(v.info.duration * 60)),

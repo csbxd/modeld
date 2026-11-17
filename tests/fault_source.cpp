@@ -29,6 +29,15 @@ int main(int argc, char **argv) {
                             .dump(),
                         "application/json");
     });
+    // Keep delivering bytes more often than rw_timeout. Only the probe's
+    // absolute deadline or cancellation can terminate this read promptly.
+    server.Get("/drip", [&](const auto &, auto &res) {
+        res.set_content_provider(bytes.size(), "video/mp4",
+                                 [&](size_t offset, size_t, httplib::DataSink &sink) {
+                                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                                     return sink.write(bytes.data() + offset, 1);
+                                 });
+    });
     for (const bool primary_source : {true, false}) {
         server.Get(
             primary_source ? "/primary" : "/backup", [&, primary_source](const auto &, auto &res) {

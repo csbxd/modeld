@@ -10,6 +10,7 @@
   "segment_seconds": 2,
   "cache_segments": 12,
   "session_ttl_seconds": 120,
+  "source_timeout_seconds": 30,
   "encoder_qp": 18,
   "encoder": "hevc_nvenc"
 }

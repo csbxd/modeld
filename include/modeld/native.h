@@ -17,8 +17,12 @@ typedef struct {
 } ModeldSegment;
 void *modeld_context_create(const char *model, const char *cache);
 void modeld_context_free(void *context);
+void *modeld_cancel_token_create(void);
+void modeld_cancel_token_set(void *token);
+void modeld_cancel_token_free(void *token);
 void *modeld_video_open(void *context, const char *sources_json, const char *source_headers,
-                        int segment_seconds, int qp, const char *encoder, ModeldVideoInfo *info);
+                        int segment_seconds, int qp, const char *encoder,
+                        int source_timeout_seconds, void *cancel_token, ModeldVideoInfo *info);
 void modeld_video_cancel(void *video);
 void modeld_video_free(void *video);
 int modeld_video_render(void *video, int64_t sequence, ModeldSegment *result);

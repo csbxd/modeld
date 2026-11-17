@@ -1,4 +1,5 @@
 #include "modeld/rife.hpp"
+#include "modeld/limits.hpp"
 #include <NvInfer.h>
 #include <NvOnnxParser.h>
 #include <array>
@@ -86,8 +87,9 @@ struct Rife::Impl {
 Logger Rife::Impl::logger;
 Rife::Rife(const std::filesystem::path &model, const std::filesystem::path &directory, int w, int h)
     : impl(std::make_unique<Impl>(w, h)) {
-    if (w < 32 || h < 32 || w > 1920 || h > 1080 || w % 2 || h % 2)
-        throw std::runtime_error("Supported native dimensions: even 32..1920 x 32..1080");
+    if (!supported_dimensions(w, h))
+        throw std::runtime_error(
+            "Supported native dimensions: even sizes, long side <= 1920, short side <= 1080");
     cu(cudaSetDevice(0));
     auto bytes = read(model);
     const auto fingerprint = hash(bytes);

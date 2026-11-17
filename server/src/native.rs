@@ -16,6 +16,10 @@ pub struct Segment {
     pub frames: i32,
     pub seconds: f64,
 }
+pub struct SourceControl {
+    pub timeout_seconds: i32,
+    pub cancellation: Arc<Cancellation>,
+}
 
 #[cfg(feature = "native")]
 mod implementation {
@@ -34,6 +38,9 @@ mod implementation {
     extern "C" {
         fn modeld_context_create(model: *const c_char, cache: *const c_char) -> *mut c_void;
         fn modeld_context_free(context: *mut c_void);
+        fn modeld_cancel_token_create() -> *mut c_void;
+        fn modeld_cancel_token_set(token: *mut c_void);
+        fn modeld_cancel_token_free(token: *mut c_void);
         fn modeld_video_open(
             context: *mut c_void,
             url: *const c_char,
@@ -41,6 +48,8 @@ mod implementation {
             seconds: c_int,
             qp: c_int,
             encoder: *const c_char,
+            source_timeout_seconds: c_int,
+            cancel_token: *mut c_void,
             info: *mut Info,
         ) -> *mut c_void;
         fn modeld_video_cancel(video: *mut c_void);
@@ -62,6 +71,25 @@ mod implementation {
     }
     fn cstring(s: &str) -> Result<CString, ApiError> {
         CString::new(s).map_err(|_| ApiError::new(422, "Embedded NUL in native argument"))
+    }
+    pub struct Cancellation(NonNull<c_void>);
+    // The token owns a shared atomic flag; set/free do not access the FFmpeg objects.
+    unsafe impl Send for Cancellation {}
+    unsafe impl Sync for Cancellation {}
+    impl Cancellation {
+        pub fn new() -> Result<Arc<Self>, ApiError> {
+            NonNull::new(unsafe { modeld_cancel_token_create() })
+                .map(|ptr| Arc::new(Self(ptr)))
+                .ok_or_else(error)
+        }
+        pub fn cancel(&self) {
+            unsafe { modeld_cancel_token_set(self.0.as_ptr()) }
+        }
+    }
+    impl Drop for Cancellation {
+        fn drop(&mut self) {
+            unsafe { modeld_cancel_token_free(self.0.as_ptr()) }
+        }
     }
     pub struct Backend {
         ptr: NonNull<c_void>,
@@ -105,6 +133,7 @@ mod implementation {
             seconds: i32,
             qp: i32,
             encoder: &str,
+            control: &SourceControl,
         ) -> Result<Arc<Self>, ApiError> {
             let u = cstring(url)?;
             let headers = cstring(source_headers)?;
@@ -118,6 +147,8 @@ mod implementation {
                     seconds,
                     qp,
                     encoder.as_ptr(),
+                    control.timeout_seconds,
+                    control.cancellation.0.as_ptr(),
                     &mut info,
                 )
             })
@@ -160,6 +191,13 @@ mod implementation {
 #[cfg(not(feature = "native"))]
 mod implementation {
     use super::*;
+    pub struct Cancellation;
+    impl Cancellation {
+        pub fn new() -> Result<Arc<Self>, ApiError> {
+            Ok(Arc::new(Self))
+        }
+        pub fn cancel(&self) {}
+    }
     pub struct Backend;
     impl Backend {
         pub fn new(_: &str, _: &str) -> Result<Arc<Self>, ApiError> {
@@ -177,7 +215,9 @@ mod implementation {
             _: i32,
             _: i32,
             _: &str,
+            control: &SourceControl,
         ) -> Result<Arc<Self>, ApiError> {
+            let _ = (control.timeout_seconds, &control.cancellation);
             Err(ApiError::new(503, "Native GPU backend was not compiled"))
         }
         pub fn cancel(&self) {}
@@ -186,4 +226,4 @@ mod implementation {
         }
     }
 }
-pub use implementation::{Backend, Video};
+pub use implementation::{Backend, Cancellation, Video};

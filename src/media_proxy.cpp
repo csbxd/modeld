@@ -216,10 +216,11 @@ struct MediaProxy::Impl {
             listener.join();
     }
 };
-MediaProxy::MediaProxy(const std::string &remote, double duration)
+MediaProxy::MediaProxy(const std::string &remote, double duration, const Json &config,
+                       std::stop_token stop)
     : impl(std::make_unique<Impl>()) {
     log_event("media.timeline.request", {{"origin", log_url(remote)}, {"duration", duration}});
-    auto resolved = media_url(remote);
+    auto resolved = media_url(remote, config);
     auto slash = resolved.find('/', 7);
     if (!resolved.starts_with("http://") || slash == std::string::npos)
         throw Error(422, "An HTTP modeld media URL is required");
@@ -228,8 +229,14 @@ MediaProxy::MediaProxy(const std::string &remote, double duration)
     impl->duration = duration;
     impl->token = random_id();
     httplib::Client probe(impl->origin);
-    probe.set_connection_timeout(10);
-    probe.set_read_timeout(30);
+    configure_api_client(probe, config);
+    probe.set_connection_timeout(5);
+    probe.set_read_timeout(5);
+    probe.set_max_timeout(10000);
+    probe.set_payload_max_length(2 * 1024 * 1024);
+    std::stop_callback cancel_probe(stop, [&] { probe.stop(); });
+    if (stop.stop_requested())
+        throw Error(499, "Session creation canceled");
     auto response = probe.Get(impl->prefix + "index.m3u8");
     log_event("media.timeline.response",
               {{"status", response ? response->status : 0},
@@ -271,6 +278,7 @@ MediaProxy::MediaProxy(const std::string &remote, double duration)
         throw Error(503, "Cannot bind local video proxy");
     for (int i = 0; i < 4; i++) {
         auto client = std::make_shared<httplib::Client>(impl->origin);
+        configure_api_client(*client, config);
         client->set_keep_alive(true);
         client->set_connection_timeout(10);
         client->set_read_timeout(3600);

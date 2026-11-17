@@ -1,5 +1,6 @@
-#include "modeld/common.hpp"
+#include "modeld/input.hpp"
 #include <algorithm>
+#include <httplib.h>
 #include <regex>
 
 namespace modeld {
@@ -21,7 +22,7 @@ MediaUrl media_url_parts(const std::string &url) {
 }
 } // namespace
 
-std::vector<std::string> bilibili_video_sources(const std::string &source, const Json &playinfo) {
+std::vector<std::string> bilibili_sources(const std::string &source, const Json &playinfo) {
     const auto chosen = media_url_parts(source);
     if (chosen.file.empty() || !playinfo.is_object() || !playinfo.contains("dash") ||
         !playinfo["dash"].is_object())
@@ -44,13 +45,11 @@ std::vector<std::string> bilibili_video_sources(const std::string &source, const
         for (const auto &video : entries) {
             if (!video.is_object())
                 continue;
-            for (const auto *name : {"baseUrl", "base_url"})
-                if (video.contains(name))
-                    add(video[name]);
-            for (const auto *name : {"backupUrl", "backup_url"})
-                if (video.contains(name) && video[name].is_array())
-                    for (const auto &backup : video[name])
-                        add(backup);
+            if (video.contains("baseUrl"))
+                add(video["baseUrl"]);
+            if (video.contains("backupUrl") && video["backupUrl"].is_array())
+                for (const auto &backup : video["backupUrl"])
+                    add(backup);
         }
     };
     for (const auto *type : {"video", "audio"})
@@ -75,8 +74,8 @@ std::vector<std::string> bilibili_video_sources(const std::string &source, const
     return urls;
 }
 
-std::vector<std::string> resolve_video_sources(const std::string &webpage,
-                                               const std::string &source, std::stop_token stop) {
+std::vector<std::string> resolve_sources(const std::string &webpage, const std::string &source,
+                                         std::stop_token stop) {
     static const std::regex page(
         R"(^https?://(?:www\.)?bilibili\.com/video/(BV[0-9A-Za-z]+)(?:[/?#].*)?$)");
     static const std::regex file(R"(^([0-9]+)-[0-9]+-[0-9]+\.m4s$)");
@@ -104,7 +103,7 @@ std::vector<std::string> resolve_video_sources(const std::string &webpage,
         auto result = Json::parse(response->body);
         if (result.value("code", -1) != 0 || !result.contains("data"))
             throw Error(503, "Bilibili backup addresses unavailable");
-        auto urls = bilibili_video_sources(source, result["data"]);
+        auto urls = bilibili_sources(source, result["data"]);
         log_event("source.alternatives", {{"count", urls.size()},
                                           {"selected", log_url(urls.front())},
                                           {"original", log_url(source)}});

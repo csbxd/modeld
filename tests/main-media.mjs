@@ -34,28 +34,24 @@ const gate = new Promise(resolve => { release = resolve; });
 const requests = [];
 const server = http.createServer(async (req, res) => {
     req.resume();
-    if (req.method === 'POST' && req.url === '/v1/sessions') {
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({id: 'fixture', width: 320, height: 180, duration: 12,
-            source_fps: 30, playlist_url: `http://127.0.0.1:${server.address().port}/media/index.m3u8`,
-            media: {output_mode: 'main', tracks: [
-                {type: 'audio', id: 1, source_index: 1, separate: false},
-                {type: 'sub', id: 1, source_index: 2, separate: false}
-            ]}}));
-    } else if (req.url === '/health') {
-        res.end('{"status":"ready"}');
-    } else if (req.url.endsWith('/heartbeat') || req.method === 'DELETE') {
-        res.end('{}');
-    } else if (req.url === '/media/index.m3u8') {
-        res.end('#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MAP:URI="init.mkv"\n#EXT-X-ENDLIST\n');
-    } else if (req.url === '/media/init.mkv') {
-        res.end(fs.readFileSync(path.join(segments, 'init.mkv')));
-    } else if (/^\/media\/segments\/[0-5]\.mkv$/.test(req.url)) {
-        const index = Number(req.url.match(/\/(\d+)\.mkv$/)[1]);
-        requests.push(index);
-        if (index >= 2) await gate;
-        res.end(fs.readFileSync(path.join(segments, `${index}.mkv`)));
-    } else res.writeHead(404).end();
+    const id='f'.repeat(32),base='/api/v2/sessions/'+id;
+    if(req.method==='POST'&&req.url==='/api/v2/sessions'){
+        res.setHeader('Content-Type','application/json');
+        res.writeHead(201).end(JSON.stringify({id,lease_seconds:120,manifest:{schema:2,
+            init:base+'/media/init',segment_template:base+'/media/segments/{index}',media:{
+                width:320,height:180,duration_seconds:12,source_fps:30,output_fps:60,segment_seconds:2,segment_count:6,
+                tracks:[{kind:'video',id:1,source:'video',source_index:0,codec:'hevc',language:'',title:''},
+                    {kind:'audio',id:1,source:'video',source_index:1,codec:'flac',language:'',title:''},
+                    {kind:'subtitle',id:1,source:'video',source_index:2,codec:'ass',language:'',title:''}]}}}));
+    }else if(req.url==='/healthz'){res.end('{"status":"ready","protocol":2}');
+    }else if(req.method==='DELETE'){res.writeHead(204).end();
+    }else if(req.url===base+'/lease'){res.end('{}');
+    }else if(req.url===base+'/media/init'){res.end(fs.readFileSync(path.join(segments,'init.mkv')));
+    }else if(new RegExp('^'+base+'/media/segments/[0-5]$').test(req.url)){
+        const index=Number(req.url.slice(req.url.lastIndexOf('/')+1));requests.push(index);
+        if(index>=2)await gate;
+        res.end(fs.readFileSync(path.join(segments,index+'.mkv')));
+    }else res.writeHead(404).end();
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const config = path.join(root, 'config');
@@ -63,8 +59,8 @@ fs.mkdirSync(path.join(config, 'modeld'), {recursive: true, mode: 0o700});
 const token = path.join(root, 'token');
 fs.writeFileSync(token, randomBytes(32).toString('hex'), {mode: 0o600});
 fs.writeFileSync(path.join(config, 'modeld/client.json'), JSON.stringify({
-    api: `http://127.0.0.1:${server.address().port}`, token_file: token,
-    callback_address: '127.0.0.1'
+    endpoint: `http://127.0.0.1:${server.address().port}`, token_file: token,
+    source_bind: '127.0.0.1'
 }), {mode: 0o600});
 const log = fs.openSync(path.join(root, 'mpv.stderr'), 'w', 0o600);
 const player = spawn('mpv', ['--no-config', '--load-scripts=no', `--script=${plugin}`,
@@ -135,7 +131,7 @@ try {
     await until(processed, 'processed main media');
     assert.equal(await get('path'), source);
     assert.deepEqual(await entries(), playlist);
-    assert((await get('stream-open-filename')).endsWith('/index.edl'));
+    assert((await get('stream-open-filename')).endsWith('/timeline.edl'));
     assert.equal(await get('demuxer-seekable-cache'), seekCache);
     report.tracks = (await get('track-list')).map(({type, codec, external, selected}) =>
         ({type, codec, external, selected}));

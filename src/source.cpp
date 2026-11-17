@@ -1,5 +1,6 @@
-#include "modeld/common.hpp"
+#include "modeld/input.hpp"
 #include <fcntl.h>
+#include <httplib.h>
 #include <thread>
 #include <unistd.h>
 namespace modeld {
@@ -51,6 +52,8 @@ SourceServer::SourceServer(const std::filesystem::path &input, const std::string
 }
 SourceServer::~SourceServer() = default;
 std::string SourceServer::url() const {
-    return "http://" + impl->address + ":" + std::to_string(impl->port) + "/source/" + impl->token;
+    const auto host =
+        impl->address.find(':') == std::string::npos ? impl->address : "[" + impl->address + "]";
+    return "http://" + host + ":" + std::to_string(impl->port) + "/source/" + impl->token;
 }
 } // namespace modeld

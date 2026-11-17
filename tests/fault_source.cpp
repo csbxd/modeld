@@ -1,8 +1,9 @@
 // Manual integration fixture: serve a seekable video, interrupt its active
 // primary connection with POST /fail, and leave /backup healthy. Bind locally.
-#include "modeld/common.hpp"
+#include "modeld/input.hpp"
 #include <atomic>
 #include <fstream>
+#include <httplib.h>
 #include <iostream>
 #include <thread>
 

@@ -1,265 +1,216 @@
-use crate::ApiError;
-use serde::Serialize;
-use std::sync::Arc;
+use crate::{
+    config::Config,
+    engine::{Engine, Segment, Stream},
+    error::{ApiError, Result},
+};
+use modeld_protocol::{CreateSession, Media};
+use std::{
+    ffi::{c_char, c_int, c_void, CStr, CString},
+    ptr::NonNull,
+    sync::Arc,
+};
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Default, Serialize)]
-pub struct Info {
-    pub width: i32,
-    pub height: i32,
-    pub duration: f64,
-    pub source_fps: f64,
+#[derive(Default)]
+struct RawSegment {
+    data: *const u8,
+    length: usize,
+    frames: c_int,
+    seconds: f64,
+    owner: *mut c_void,
 }
-#[derive(Debug)]
-pub struct Segment {
-    pub bytes: Vec<u8>,
-    pub frames: i32,
-    pub seconds: f64,
+extern "C" {
+    fn modeld_context_create(model: *const c_char, cache: *const c_char) -> *mut c_void;
+    fn modeld_context_free(context: *mut c_void);
+    fn modeld_cancel_token_create() -> *mut c_void;
+    fn modeld_cancel_token_set(token: *mut c_void);
+    #[cfg(test)]
+    fn modeld_cancel_token_is_set(token: *mut c_void) -> c_int;
+    fn modeld_cancel_token_free(token: *mut c_void);
+    fn modeld_stream_open(
+        context: *mut c_void,
+        request: *const c_char,
+        settings: *const c_char,
+        cancellation: *mut c_void,
+    ) -> *mut c_void;
+    fn modeld_stream_description(stream: *mut c_void) -> *const c_char;
+    fn modeld_stream_init(stream: *mut c_void, out: *mut RawSegment) -> c_int;
+    fn modeld_stream_render(stream: *mut c_void, index: u64, out: *mut RawSegment) -> c_int;
+    fn modeld_stream_cancel(stream: *mut c_void);
+    fn modeld_stream_free(stream: *mut c_void);
+    fn modeld_segment_free(out: *mut RawSegment);
+    fn modeld_last_error() -> *const c_char;
+    fn modeld_last_status() -> c_int;
 }
-pub struct SourceControl {
-    pub timeout_seconds: i32,
-    pub cancellation: Arc<Cancellation>,
-    pub media_options: String,
+impl Drop for RawSegment {
+    fn drop(&mut self) {
+        if !self.owner.is_null() {
+            unsafe { modeld_segment_free(self) }
+        }
+    }
 }
-
-#[cfg(feature = "native")]
-mod implementation {
-    use super::*;
-    use std::ffi::{c_char, c_int, c_void, CStr, CString};
-    use std::ptr::NonNull;
-    #[repr(C)]
-    #[derive(Default)]
-    struct RawSegment {
-        data: *const u8,
-        length: usize,
-        frames: c_int,
-        seconds: f64,
-        owner: *mut c_void,
-    }
-    extern "C" {
-        fn modeld_context_create(model: *const c_char, cache: *const c_char) -> *mut c_void;
-        fn modeld_context_free(context: *mut c_void);
-        fn modeld_cancel_token_create() -> *mut c_void;
-        fn modeld_cancel_token_set(token: *mut c_void);
-        fn modeld_cancel_token_free(token: *mut c_void);
-        fn modeld_video_open(
-            context: *mut c_void,
-            url: *const c_char,
-            source_headers: *const c_char,
-            seconds: c_int,
-            qp: c_int,
-            encoder: *const c_char,
-            source_timeout_seconds: c_int,
-            cancel_token: *mut c_void,
-            media_options: *const c_char,
-            info: *mut Info,
-        ) -> *mut c_void;
-        fn modeld_video_metadata(video: *mut c_void) -> *const c_char;
-        fn modeld_video_header(video: *mut c_void, out: *mut RawSegment) -> c_int;
-        fn modeld_video_cancel(video: *mut c_void);
-        fn modeld_video_free(video: *mut c_void);
-        fn modeld_video_render(video: *mut c_void, sequence: i64, out: *mut RawSegment) -> c_int;
-        fn modeld_segment_free(out: *mut RawSegment);
-        fn modeld_last_error() -> *const c_char;
-        fn modeld_last_status() -> c_int;
-    }
-    fn error() -> ApiError {
-        unsafe {
-            ApiError::new(
-                modeld_last_status() as u16,
-                CStr::from_ptr(modeld_last_error())
-                    .to_string_lossy()
-                    .into_owned(),
-            )
+impl RawSegment {
+    fn bytes(&self) -> Vec<u8> {
+        if self.length == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(self.data, self.length) }.to_vec()
         }
     }
-    fn cstring(s: &str) -> Result<CString, ApiError> {
-        CString::new(s).map_err(|_| ApiError::new(422, "Embedded NUL in native argument"))
+}
+fn error() -> ApiError {
+    unsafe {
+        ApiError::native(
+            modeld_last_status() as u16,
+            CStr::from_ptr(modeld_last_error())
+                .to_string_lossy()
+                .into_owned(),
+        )
     }
-    pub struct Cancellation(NonNull<c_void>);
-    // The token owns a shared atomic flag; set/free do not access the FFmpeg objects.
-    unsafe impl Send for Cancellation {}
-    unsafe impl Sync for Cancellation {}
-    impl Cancellation {
-        pub fn new() -> Result<Arc<Self>, ApiError> {
-            NonNull::new(unsafe { modeld_cancel_token_create() })
-                .map(|ptr| Arc::new(Self(ptr)))
-                .ok_or_else(error)
-        }
-        pub fn cancel(&self) {
-            unsafe { modeld_cancel_token_set(self.0.as_ptr()) }
-        }
+}
+fn cstring(value: &str) -> Result<CString> {
+    CString::new(value).map_err(|_| ApiError::invalid("Native input contains NUL"))
+}
+pub struct Cancellation(NonNull<c_void>);
+// The token exclusively owns a shared atomic flag. It never accesses FFmpeg objects.
+unsafe impl Send for Cancellation {}
+unsafe impl Sync for Cancellation {}
+impl Cancellation {
+    pub fn new() -> Result<Arc<Self>> {
+        NonNull::new(unsafe { modeld_cancel_token_create() })
+            .map(|p| Arc::new(Self(p)))
+            .ok_or_else(error)
     }
-    impl Drop for Cancellation {
-        fn drop(&mut self) {
-            unsafe { modeld_cancel_token_free(self.0.as_ptr()) }
-        }
+    pub fn cancel(&self) {
+        unsafe { modeld_cancel_token_set(self.0.as_ptr()) }
     }
-    pub struct Backend {
-        ptr: NonNull<c_void>,
-        render_lock: std::sync::Mutex<()>,
+    #[cfg(test)]
+    pub fn canceled(&self) -> bool {
+        unsafe { modeld_cancel_token_is_set(self.0.as_ptr()) != 0 }
     }
-    // Backend profile mutation is protected by its C++ mutex. GPU work is dispatched
-    // exclusively on the scheduler thread; each call sets the primary CUDA context.
-    unsafe impl Send for Backend {}
-    unsafe impl Sync for Backend {}
-    impl Backend {
-        pub fn new(model: &str, cache: &str) -> Result<Arc<Self>, ApiError> {
-            let m = cstring(model)?;
-            let c = cstring(cache)?;
-            let ptr = NonNull::new(unsafe { modeld_context_create(m.as_ptr(), c.as_ptr()) })
-                .ok_or_else(error)?;
-            Ok(Arc::new(Self {
-                ptr,
-                render_lock: std::sync::Mutex::new(()),
-            }))
-        }
+}
+impl Drop for Cancellation {
+    fn drop(&mut self) {
+        unsafe { modeld_cancel_token_free(self.0.as_ptr()) }
     }
-    impl Drop for Backend {
-        fn drop(&mut self) {
-            unsafe { modeld_context_free(self.ptr.as_ptr()) }
-        }
+}
+pub struct Backend {
+    ptr: NonNull<c_void>,
+}
+// C++ protects its profile cache. GPU rendering is exclusive to Scheduler's worker.
+unsafe impl Send for Backend {}
+unsafe impl Sync for Backend {}
+impl Backend {
+    pub fn new(model: &str, cache: &str) -> Result<Arc<Self>> {
+        let model = cstring(model)?;
+        let cache = cstring(cache)?;
+        NonNull::new(unsafe { modeld_context_create(model.as_ptr(), cache.as_ptr()) })
+            .map(|ptr| Arc::new(Self { ptr }))
+            .ok_or_else(error)
     }
-    pub struct Video {
-        ptr: NonNull<c_void>,
-        pub info: Info,
-        pub metadata: serde_json::Value,
-        pub header: Vec<u8>,
-        _backend: Arc<Backend>,
+}
+impl Drop for Backend {
+    fn drop(&mut self) {
+        unsafe { modeld_context_free(self.ptr.as_ptr()) }
     }
-    // Opening/probing precedes publication. Render is called only on the one GPU
-    // scheduler thread. The sole concurrent native operation is atomic cancellation.
-    unsafe impl Send for Video {}
-    unsafe impl Sync for Video {}
-    impl Video {
-        pub fn open(
-            backend: Arc<Backend>,
-            url: &str,
-            source_headers: &str,
-            seconds: i32,
-            qp: i32,
-            encoder: &str,
-            control: &SourceControl,
-        ) -> Result<Arc<Self>, ApiError> {
-            let u = cstring(url)?;
-            let headers = cstring(source_headers)?;
-            let encoder = cstring(encoder)?;
-            let media_options = cstring(&control.media_options)?;
-            let mut info = Info::default();
-            let ptr = NonNull::new(unsafe {
-                modeld_video_open(
-                    backend.ptr.as_ptr(),
-                    u.as_ptr(),
-                    headers.as_ptr(),
-                    seconds,
-                    qp,
-                    encoder.as_ptr(),
-                    control.timeout_seconds,
-                    control.cancellation.0.as_ptr(),
-                    media_options.as_ptr(),
-                    &mut info,
+}
+struct NativeStream {
+    ptr: NonNull<c_void>,
+    media: Media,
+    initialization: Arc<Vec<u8>>,
+    _backend: Arc<Backend>,
+}
+// Stream is published after probing. Only Scheduler calls render; cancel only sets an atomic flag.
+unsafe impl Send for NativeStream {}
+unsafe impl Sync for NativeStream {}
+struct Guard(NonNull<c_void>);
+impl Drop for Guard {
+    fn drop(&mut self) {
+        unsafe { modeld_stream_free(self.0.as_ptr()) }
+    }
+}
+impl Engine for Backend {
+    fn open(
+        self: Arc<Self>,
+        request: &CreateSession,
+        config: &Config,
+        cancellation: Arc<Cancellation>,
+    ) -> Result<Arc<dyn Stream>> {
+        let request = cstring(
+            &serde_json::to_string(request)
+                .map_err(|_| ApiError::invalid("Invalid native input"))?,
+        )?;
+        let settings = cstring(
+            &serde_json::json!({"segment_seconds":config.output.segment_seconds,
+            "encoder":config.output.codec.encoder(),"qp":config.output.qp,
+            "source_timeout_seconds":config.limits.source_timeout_seconds})
+            .to_string(),
+        )?;
+        let guard = Guard(
+            NonNull::new(unsafe {
+                modeld_stream_open(
+                    self.ptr.as_ptr(),
+                    request.as_ptr(),
+                    settings.as_ptr(),
+                    cancellation.0.as_ptr(),
                 )
             })
-            .ok_or_else(error)?;
-            let metadata =
-                unsafe { CStr::from_ptr(modeld_video_metadata(ptr.as_ptr())) }.to_string_lossy();
-            let metadata = match serde_json::from_str(&metadata) {
-                Ok(value) => value,
-                Err(_) => {
-                    unsafe { modeld_video_free(ptr.as_ptr()) };
-                    return Err(ApiError::new(502, "Invalid native media metadata"));
-                }
-            };
-            let mut raw = RawSegment::default();
-            if unsafe { modeld_video_header(ptr.as_ptr(), &mut raw) } != 0 {
-                unsafe { modeld_video_free(ptr.as_ptr()) };
-                return Err(error());
-            }
-            let header = if raw.length == 0 {
-                Vec::new()
-            } else {
-                unsafe { std::slice::from_raw_parts(raw.data, raw.length) }.to_vec()
-            };
-            unsafe { modeld_segment_free(&mut raw) };
-            Ok(Arc::new(Self {
-                ptr,
-                info,
-                metadata,
-                header,
-                _backend: backend,
-            }))
+            .ok_or_else(error)?,
+        );
+        let description = unsafe { CStr::from_ptr(modeld_stream_description(guard.0.as_ptr())) };
+        let media: Media = serde_json::from_slice(description.to_bytes()).map_err(|_| {
+            ApiError::new(
+                502,
+                "invalid_backend_output",
+                "Invalid native media description",
+            )
+        })?;
+        let mut header = RawSegment::default();
+        if unsafe { modeld_stream_init(guard.0.as_ptr(), &mut header) } != 0 {
+            return Err(error());
         }
-        pub fn cancel(&self) {
-            unsafe { modeld_video_cancel(self.ptr.as_ptr()) }
+        let initialization = Arc::new(header.bytes());
+        if initialization.is_empty() {
+            return Err(ApiError::new(
+                502,
+                "invalid_backend_output",
+                "Empty Matroska initialization",
+            ));
         }
-        pub fn render(&self, sequence: i64) -> Result<Segment, ApiError> {
-            let _guard = self
-                ._backend
-                .render_lock
-                .lock()
-                .map_err(|_| ApiError::new(503, "GPU rendering lock was poisoned"))?;
-            let mut out = RawSegment::default();
-            if unsafe { modeld_video_render(self.ptr.as_ptr(), sequence, &mut out) } != 0 {
-                return Err(error());
-            }
-            let bytes = unsafe { std::slice::from_raw_parts(out.data, out.length) }.to_vec();
-            let result = Segment {
-                bytes,
-                frames: out.frames,
-                seconds: out.seconds,
-            };
-            unsafe { modeld_segment_free(&mut out) };
-            Ok(result)
-        }
-    }
-    impl Drop for Video {
-        fn drop(&mut self) {
-            unsafe { modeld_video_free(self.ptr.as_ptr()) }
-        }
+        let ptr = guard.0;
+        std::mem::forget(guard);
+        Ok(Arc::new(NativeStream {
+            ptr,
+            media,
+            initialization,
+            _backend: self,
+        }))
     }
 }
-#[cfg(not(feature = "native"))]
-mod implementation {
-    use super::*;
-    pub struct Cancellation;
-    impl Cancellation {
-        pub fn new() -> Result<Arc<Self>, ApiError> {
-            Ok(Arc::new(Self))
-        }
-        pub fn cancel(&self) {}
+impl Stream for NativeStream {
+    fn media(&self) -> &Media {
+        &self.media
     }
-    pub struct Backend;
-    impl Backend {
-        pub fn new(_: &str, _: &str) -> Result<Arc<Self>, ApiError> {
-            Err(ApiError::new(503, "Native GPU backend was not compiled"))
-        }
+    fn initialization(&self) -> Arc<Vec<u8>> {
+        self.initialization.clone()
     }
-    pub struct Video {
-        pub info: Info,
-        pub metadata: serde_json::Value,
-        pub header: Vec<u8>,
+    fn cancel(&self) {
+        unsafe { modeld_stream_cancel(self.ptr.as_ptr()) }
     }
-    impl Video {
-        pub fn open(
-            _: Arc<Backend>,
-            _: &str,
-            _: &str,
-            _: i32,
-            _: i32,
-            _: &str,
-            control: &SourceControl,
-        ) -> Result<Arc<Self>, ApiError> {
-            let _ = (
-                control.timeout_seconds,
-                &control.cancellation,
-                &control.media_options,
-            );
-            Err(ApiError::new(503, "Native GPU backend was not compiled"))
+    fn render(&self, index: u64) -> Result<Segment> {
+        let mut raw = RawSegment::default();
+        if unsafe { modeld_stream_render(self.ptr.as_ptr(), index, &mut raw) } != 0 {
+            return Err(error());
         }
-        pub fn cancel(&self) {}
-        pub fn render(&self, _: i64) -> Result<Segment, ApiError> {
-            Err(ApiError::new(503, "Native GPU backend was not compiled"))
-        }
+        Ok(Segment {
+            bytes: raw.bytes(),
+            frames: raw.frames as u32,
+            render_seconds: raw.seconds,
+        })
     }
 }
-pub use implementation::{Backend, Cancellation, Video};
+impl Drop for NativeStream {
+    fn drop(&mut self) {
+        unsafe { modeld_stream_free(self.ptr.as_ptr()) }
+    }
+}

@@ -1,0 +1,288 @@
+{
+  "date": "2026-11-17",
+  "version": "0.1.5",
+  "test_mode": "Installed Portage packages, production systemd service, asa full mpv configuration with gpu-next Wayland Vulkan",
+  "start": 6421,
+  "tracks": [
+    {
+      "id": 1,
+      "type": "video",
+      "codec": "av1",
+      "external": false,
+      "selected": false,
+      "demux-fps": 30
+    },
+    {
+      "id": 1,
+      "type": "audio",
+      "codec": "aac",
+      "external": false,
+      "selected": true
+    },
+    {
+      "id": 2,
+      "type": "audio",
+      "codec": "aac",
+      "external": false,
+      "selected": false
+    },
+    {
+      "id": 3,
+      "type": "audio",
+      "codec": "aac",
+      "external": false,
+      "selected": false
+    },
+    {
+      "id": 1,
+      "type": "sub",
+      "codec": "ass",
+      "external": true,
+      "selected": true
+    },
+    {
+      "id": 10,
+      "type": "video",
+      "codec": "hevc",
+      "external": true,
+      "selected": true,
+      "demux-fps": 60
+    }
+  ],
+  "rows": [
+    {
+      "elapsed": 1,
+      "time-pos": 6421,
+      "pause": false,
+      "seeking": true,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 2,
+      "time-pos": 6421,
+      "pause": false,
+      "seeking": true,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 3,
+      "time-pos": 6421,
+      "pause": false,
+      "seeking": true,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 4,
+      "time-pos": 6421,
+      "pause": false,
+      "seeking": true,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 5,
+      "time-pos": 6421,
+      "pause": false,
+      "seeking": true,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 6,
+      "time-pos": 6421,
+      "pause": false,
+      "seeking": true,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 7,
+      "time-pos": 6421,
+      "pause": false,
+      "seeking": true,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 8,
+      "time-pos": 6421,
+      "pause": false,
+      "seeking": true,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 9,
+      "time-pos": 6421,
+      "pause": false,
+      "seeking": true,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 10,
+      "time-pos": 6421.016667,
+      "audio-pts": 6420.999977,
+      "pause": true,
+      "seeking": false,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 11,
+      "time-pos": 6421.016667,
+      "audio-pts": 6420.999977,
+      "pause": true,
+      "seeking": false,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 12,
+      "time-pos": 6421.5,
+      "audio-pts": 6421.477725,
+      "pause": false,
+      "seeking": false,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 13,
+      "time-pos": 6422.5,
+      "audio-pts": 6422.483701,
+      "pause": false,
+      "seeking": false,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 14,
+      "time-pos": 6423.516667,
+      "audio-pts": 6423.488439,
+      "pause": false,
+      "seeking": false,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 15,
+      "time-pos": 6424.516667,
+      "audio-pts": 6424.491097,
+      "pause": false,
+      "seeking": false,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 16,
+      "time-pos": 6425.516667,
+      "audio-pts": 6425.49255,
+      "pause": false,
+      "seeking": false,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 17,
+      "time-pos": 6426.516667,
+      "audio-pts": 6426.493414,
+      "pause": false,
+      "seeking": false,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 18,
+      "time-pos": 6427.516667,
+      "audio-pts": 6427.494857,
+      "pause": false,
+      "seeking": false,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 19,
+      "time-pos": 6428.516667,
+      "audio-pts": 6428.497588,
+      "pause": false,
+      "seeking": false,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 20,
+      "time-pos": 6429.516667,
+      "audio-pts": 6429.501727,
+      "pause": false,
+      "seeking": false,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 21,
+      "time-pos": 6430.533333,
+      "audio-pts": 6430.504971,
+      "pause": false,
+      "seeking": false,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 22,
+      "time-pos": 6431.533333,
+      "audio-pts": 6431.508488,
+      "pause": false,
+      "seeking": false,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 23,
+      "time-pos": 6432.533333,
+      "audio-pts": 6432.512705,
+      "pause": false,
+      "seeking": false,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    },
+    {
+      "elapsed": 24,
+      "time-pos": 6433.55,
+      "audio-pts": 6433.519142,
+      "pause": false,
+      "seeking": false,
+      "frame-drop-count": 0,
+      "decoder-frame-drop-count": 0,
+      "vid": 10
+    }
+  ],
+  "screenshot": "success",
+  "max_dropped_frames": 0,
+  "max_sampled_audio_video_difference_seconds": 0.03085800000008021
+}

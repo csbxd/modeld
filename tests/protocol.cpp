@@ -1,6 +1,7 @@
 #include "modeld/common.hpp"
 #include <fstream>
 #include <iostream>
+#include <sys/stat.h>
 #include <thread>
 static void check(bool condition, const char *message) {
     if (!condition)
@@ -108,6 +109,39 @@ int main() {
             listener.join();
         }
         check(model_catalog()["data"][0]["precision"] == "fp32", "model precision advertised");
+        {
+            const char *prior = std::getenv("XDG_STATE_HOME");
+            const std::string saved = prior ? prior : "";
+            auto directory = std::filesystem::temp_directory_path() / ("modeld-log-" + random_id());
+            setenv("XDG_STATE_HOME", directory.c_str(), 1);
+            log_event(
+                "test",
+                {{"token", "secret_token"},
+                 {"source_headers", {{"Cookie", "secret_cookie"}}},
+                 {"error",
+                  "failed https://user:secret_password@cdn.example/private_media?key=secret_query "
+                  "Bearer secret_bearer"},
+                 {"ipv6", "https://[::1]/private_media?key=secret_ipv6"},
+                 {"message", "Cookie: session=secret_cookie"}});
+            std::ifstream log(client_log_path());
+            const std::string text{std::istreambuf_iterator<char>(log), {}};
+            check(!text.empty() && text.find("cdn.example/[redacted]") != std::string::npos,
+                  "persistent diagnostics keep origin hosts");
+            for (const auto *secret :
+                 {"secret_token", "secret_cookie", "secret_password", "secret_query",
+                  "secret_bearer", "secret_ipv6", "private_media"})
+                check(text.find(secret) == std::string::npos,
+                      "diagnostics redact credentials and URL paths");
+            struct stat status{};
+            check(::stat(client_log_path().c_str(), &status) == 0 &&
+                      (status.st_mode & 0777) == 0600,
+                  "private diagnostic file permissions");
+            if (prior)
+                setenv("XDG_STATE_HOME", saved.c_str(), 1);
+            else
+                unsetenv("XDG_STATE_HOME");
+            std::filesystem::remove_all(directory);
+        }
         std::cout << "Protocol, timeline, capability isolation and range serving passed\n";
     } catch (const std::exception &e) {
         std::cerr << e.what() << '\n';

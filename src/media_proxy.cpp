@@ -113,6 +113,11 @@ struct MediaProxy::Impl {
                     continue;
                 if (stopping || task.generation != generation || !response ||
                     response->status != 200) {
+                    if (!stopping && task.generation == generation)
+                        log_event("media.segment.failed",
+                                  {{"index", task.index},
+                                   {"status", response ? response->status : 0},
+                                   {"error", httplib::to_string(response.error())}});
                     fail_locked(task.entry, "Remote video transfer failed");
                 } else {
                     task.entry->completed = true;
@@ -135,6 +140,7 @@ struct MediaProxy::Impl {
             bool ready =
                 cached != entries.end() && cached->second->completed && !cached->second->failed;
             if (!ready && demand >= 0 && (index < demand - window || index > demand + window)) {
+                log_event("media.seek", {{"from_segment", demand}, {"to_segment", index}});
                 generation++;
                 resetting = true;
                 for (auto &[n, e] : entries)
@@ -178,6 +184,7 @@ struct MediaProxy::Impl {
 };
 MediaProxy::MediaProxy(const std::string &remote, double duration)
     : impl(std::make_unique<Impl>()) {
+    log_event("media.timeline.request", {{"origin", log_url(remote)}, {"duration", duration}});
     auto resolved = media_url(remote);
     auto slash = resolved.find('/', 7);
     if (!resolved.starts_with("http://") || slash == std::string::npos)
@@ -190,6 +197,11 @@ MediaProxy::MediaProxy(const std::string &remote, double duration)
     probe.set_connection_timeout(10);
     probe.set_read_timeout(30);
     auto response = probe.Get(impl->prefix + "index.m3u8");
+    log_event("media.timeline.response",
+              {{"status", response ? response->status : 0},
+               {"bytes", response ? response->body.size() : 0},
+               {"m3u8", response && response->body.starts_with("#EXTM3U")},
+               {"error", httplib::to_string(response.error())}});
     if (!response || response->status != 200 || !response->body.starts_with("#EXTM3U"))
         throw Error(503, "Cannot read remote video timeline");
     impl->playlist = response->body;
@@ -201,6 +213,8 @@ MediaProxy::MediaProxy(const std::string &remote, double duration)
     if (impl->seconds < 1 || impl->seconds > 10 || !std::isfinite(duration) || duration <= 0)
         throw Error(502, "Invalid remote timeline");
     impl->count = static_cast<int64_t>(std::ceil(duration / impl->seconds));
+    log_event("media.timeline.ready",
+              {{"segment_seconds", impl->seconds}, {"segments", impl->count}});
     const auto path = "/play/" + impl->token;
     impl->server.Get(path + "/index.m3u8", [this](const auto &, auto &res) {
         res.set_content(impl->playlist, "application/vnd.apple.mpegurl");

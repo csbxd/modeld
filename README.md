@@ -59,6 +59,16 @@ emerge --ask media-plugins/mpv-modeld::gentoo-cs
 
 `modelctl health` 与 `modelctl models` 可检查连接。`modelctl source FILE` 为 API 调试临时共享指定文件，结束命令即停止共享。插件会通过系统 NSS 解析 NetBird HTTP 媒体地址，兼容使用 c-ares 的 mpv/libcurl 与系统 split DNS 的差异。
 
+0.1.4 客户端默认记录结构化日志，GUI 启动 mpv 也能保留报错：
+
+```sh
+modelctl logs        # 最近 100 行
+modelctl logs 300    # 最近 300 行
+modelctl log-path    # 显示完整路径
+```
+
+默认路径为 `~/.local/state/modeld/mpv.log`，设置 `XDG_STATE_HOME` 时跟随该目录。文件权限 0600，超过 2 MiB 轮换为 `mpv.log.1`。日志包含客户端版本、PID、选中轨道、EDL 时间轴结构、API 状态和耗时、HLS 播放列表、视频轨接入与 mpv 警告；错误标注发生阶段。URL 仅保留主机，隐藏路径、查询参数、认证头及 Cookie 值。
+
 ## API
 
 | 接口 | 用途 |

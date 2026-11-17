@@ -13,7 +13,10 @@ struct Entry {
 std::vector<Entry> parse_edl(std::string_view text) {
     std::vector<Entry> entries;
     size_t cursor = 0;
-    auto invalid = [] { throw Error(422, "Cannot read mpv's resolved video timeline"); };
+    auto invalid = [&] {
+        log_event("source.timeline.invalid", {{"cursor", cursor}, {"bytes", text.size()}});
+        throw Error(422, "Cannot read mpv's resolved video timeline");
+    };
     while (cursor < text.size()) {
         if (text[cursor] == ';' || text[cursor] == '\n') {
             cursor++;
@@ -131,6 +134,22 @@ std::string resolved_video_url(const std::string &opened, const Json &selected) 
         }
     }
     finish();
+    Json summary = Json::array();
+    for (const auto &stream : streams) {
+        if (summary.size() == 32)
+            break;
+        summary.push_back({{"program", stream.program},
+                           {"segments", stream.segments},
+                           {"video", stream.video},
+                           {"typed", stream.typed},
+                           {"unsupported", stream.unsupported},
+                           {"url_bytes", stream.url.size()},
+                           {"http", http(stream.url)}});
+    }
+    log_event("source.timeline", {{"bytes", opened.size()},
+                                  {"stream_count", streams.size()},
+                                  {"streams", summary},
+                                  {"selected", log_tracks(Json::array({selected}))}});
     std::vector<const Stream *> candidates;
     for (const auto &stream : streams)
         if (stream.video || !stream.typed)
@@ -147,10 +166,16 @@ std::string resolved_video_url(const std::string &opened, const Json &selected) 
     }
     if (!chosen && candidates.size() == 1)
         chosen = candidates.front();
-    if (!chosen || chosen->unsupported || chosen->segments != 1 || !http(chosen->url))
-        throw Error(
-            422,
-            "This resolved video timeline is unsupported; a single HTTP video stream is required");
+    const std::string reason = !chosen                 ? "selected_stream_not_unique"
+                               : chosen->segments != 1 ? "multiple_segments"
+                               : chosen->unsupported   ? "fragmented_or_clipped_stream"
+                               : !http(chosen->url)    ? "non_http_stream"
+                                                       : "";
+    if (!reason.empty()) {
+        log_event("source.timeline.rejected",
+                  {{"reason", reason}, {"candidates", candidates.size()}});
+        throw Error(422, "Unsupported mpv video timeline: " + reason);
+    }
     return chosen->url;
 }
 } // namespace modeld

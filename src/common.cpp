@@ -100,6 +100,14 @@ Json client_config() {
 }
 Json request_json(const Json &c, const std::string &method, const std::string &path,
                   const Json &body) {
+    const auto started = Clock::now();
+    const bool heartbeat = path.ends_with("/heartbeat");
+    const auto route = path == "/v1/sessions"              ? "session.create"
+                       : heartbeat                         ? "session.heartbeat"
+                       : path.starts_with("/v1/sessions/") ? "session.close"
+                                                           : path;
+    if (!heartbeat)
+        log_event("api.request", {{"method", method}, {"route", route}});
     httplib::Client client(c.at("api").get<std::string>());
     client.set_connection_timeout(method == "DELETE" ? 3 : 10);
     client.set_read_timeout(method == "DELETE" ? 3 : (path.ends_with("/heartbeat") ? 5 : 180));
@@ -108,8 +116,19 @@ Json request_json(const Json &c, const std::string &method, const std::string &p
     auto result = method == "POST"     ? client.Post(path, headers, body.dump(), "application/json")
                   : method == "DELETE" ? client.Delete(path, headers)
                                        : client.Get(path, headers);
-    if (!result)
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started).count();
+    if (!result) {
+        log_event("api.failed", {{"route", route},
+                                 {"elapsed_ms", elapsed},
+                                 {"error", httplib::to_string(result.error())}});
         throw Error(503, "Model API connection failed: " + httplib::to_string(result.error()));
+    }
+    if (!heartbeat || result->status >= 400)
+        log_event("api.response", {{"route", route},
+                                   {"status", result->status},
+                                   {"elapsed_ms", elapsed},
+                                   {"bytes", result->body.size()}});
     Json j;
     try {
         j = Json::parse(result->body);

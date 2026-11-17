@@ -1,16 +1,39 @@
 #include "modeld/common.hpp"
 #include <csignal>
+#include <deque>
+#include <fstream>
 #include <iostream>
 #include <thread>
 static volatile std::sig_atomic_t stopped = 0;
 int main(int argc, char **argv) {
     using namespace modeld;
     try {
-        auto c = client_config();
         if (argc < 2)
-            throw Error(400,
-                        "Usage: modelctl models | health | source FILE | session JSON | delete ID");
+            throw Error(400, "Usage: modelctl models | health | source FILE | session JSON | "
+                             "delete ID | logs [N] | log-path");
         std::string cmd = argv[1];
+        if (cmd == "log-path") {
+            std::cout << client_log_path().string() << '\n';
+            return 0;
+        }
+        if (cmd == "logs") {
+            size_t count = argc == 3 ? std::stoul(argv[2]) : 100;
+            if (count < 1 || count > 5000)
+                throw Error(400, "Log line count must be 1..5000");
+            std::ifstream input(client_log_path());
+            if (!input)
+                throw Error(404, "No client log yet: " + client_log_path().string());
+            std::deque<std::string> lines;
+            for (std::string line; std::getline(input, line);) {
+                lines.push_back(std::move(line));
+                if (lines.size() > count)
+                    lines.pop_front();
+            }
+            for (const auto &line : lines)
+                std::cout << line << '\n';
+            return 0;
+        }
+        auto c = client_config();
         if (cmd == "models")
             std::cout << request_json(c, "GET", "/v1/models").dump(2) << '\n';
         else if (cmd == "health") {

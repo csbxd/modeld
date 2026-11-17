@@ -66,9 +66,9 @@ void command(mpv_handle *m, std::initializer_list<std::string> values) {
     if (r < 0)
         throw std::runtime_error(mpv_error_string(r));
 }
-void osd(mpv_handle *m, const std::string &s) {
+void osd(mpv_handle *m, const std::string &s, int milliseconds = 4000) {
     try {
-        command(m, {"show-text", s, "4000"});
+        command(m, {"show-text", s, std::to_string(milliseconds)});
     } catch (...) {
     }
 }
@@ -81,8 +81,11 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
     bool buffering = false, activating = false;
     int activation_pause = 0;
     double media_duration = 0;
+    std::string stage = "startup";
     Json config;
     auto clear = [&] {
+        if (!id.empty())
+            log_event("session.close");
         if (!id.empty()) {
             try {
                 request_json(config, "DELETE", "/v1/sessions/" + id);
@@ -112,34 +115,63 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
     };
     try {
         config = client_config();
+        mpv_request_log_messages(m, "warn");
+        log_event("plugin.start", {{"client_version", MODELD_VERSION},
+                                   {"mpv_version", property(m, "mpv-version")},
+                                   {"api", log_url(config.at("api").get<std::string>())}});
         std::string name = mpv_client_name(m);
         command(m, {"define-section", "modeld",
                     "Ctrl+Shift+i script-message-to " + name + " toggle\n", "default"});
         command(m, {"enable-section", "modeld", "allow-hide-cursor+allow-vo-dragging"});
         mpv_observe_property(m, 1, "pause", MPV_FORMAT_FLAG);
         mpv_observe_property(m, 2, "seeking", MPV_FORMAT_FLAG);
+        mpv_observe_property(m, 3, "track-list", MPV_FORMAT_NODE);
         auto heartbeat = Clock::now();
         for (;;) {
             auto *e = mpv_wait_event(m, 0.25);
             if (e->event_id == MPV_EVENT_SHUTDOWN)
                 break;
             try {
+                if (e->event_id == MPV_EVENT_LOG_MESSAGE) {
+                    const auto *message = static_cast<mpv_event_log_message *>(e->data);
+                    log_event("mpv.warning", {{"component", message->prefix},
+                                              {"level", message->level},
+                                              {"message", message->text}});
+                }
+                if (e->event_id == MPV_EVENT_PROPERTY_CHANGE && e->reply_userdata == 3) {
+                    const auto *changed = static_cast<mpv_event_property *>(e->data);
+                    if (changed->format == MPV_FORMAT_NODE && changed->data)
+                        log_event("tracks.changed",
+                                  {{"tracks", log_tracks(node_json(*static_cast<const mpv_node *>(
+                                                  changed->data)))}});
+                }
                 if (e->event_id == MPV_EVENT_START_FILE) {
+                    log_event("file.start");
                     clear();
                     original_vid.clear();
                     enabled_entry.clear();
                 }
                 if (e->event_id == MPV_EVENT_END_FILE) {
+                    const auto *end = static_cast<mpv_event_end_file *>(e->data);
+                    log_event("file.end", {{"reason", static_cast<int>(end->reason)},
+                                           {"mpv_error", mpv_error_string(end->error)}});
                     restore();
                     original_vid.clear();
                     enabled_entry.clear();
                 }
+                if (e->event_id == MPV_EVENT_FILE_LOADED)
+                    log_event("file.loaded", {{"tracks", log_tracks(tracks(m))},
+                                              {"vo", property(m, "current-vo")},
+                                              {"format", property(m, "file-format")}});
                 auto *msg = e->event_id == MPV_EVENT_CLIENT_MESSAGE
                                 ? static_cast<mpv_event_client_message *>(e->data)
                                 : nullptr;
                 // Other scripts can broadcast continuously. Their messages must
                 // still pass through buffering and heartbeat maintenance.
                 if (msg && msg->num_args > 0 && std::string(msg->args[0]) == "toggle") {
+                    stage = "toggle";
+                    log_event("toggle",
+                              {{"active", !id.empty()}, {"tracks", log_tracks(tracks(m))}});
                     if (!id.empty()) {
                         restore();
                         osd(m, "RIFE 已关闭，使用原视频轨");
@@ -169,6 +201,11 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                     auto external = selected.value("external-filename", std::string{});
                     if (!external.empty())
                         opened = external;
+                    stage = "source.resolve";
+                    log_event("source.resolve",
+                              {{"opened", log_url(opened)},
+                               {"timeline_bytes", opened.size()},
+                               {"selected", log_tracks(Json::array({selected}))}});
                     if (opened.starts_with("http://") || opened.starts_with("https://") ||
                         opened.starts_with("edl://")) {
                         url = resolved_video_url(opened, selected);
@@ -197,6 +234,12 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                             path, address == "auto" ? netbird_address() : address);
                         url = source->url();
                     }
+                    stage = "session.create";
+                    Json header_names = Json::array();
+                    for (const auto &[name, value] : headers.items())
+                        header_names.push_back(name);
+                    log_event("session.create",
+                              {{"source", log_url(url)}, {"header_names", header_names}});
                     auto result = request_json(config, "POST", "/v1/sessions",
                                                {{"model", model_id},
                                                 {"task", "frame_interpolation"},
@@ -207,14 +250,23 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                     if (playing_entry(m) != entry)
                         throw Error(409, "播放文件已变化，请重新开启插帧");
                     media_duration = result.at("duration").get<double>();
+                    log_event("session.created", {{"width", result.at("width")},
+                                                  {"height", result.at("height")},
+                                                  {"source_fps", result.at("source_fps")},
+                                                  {"duration", media_duration}});
+                    stage = "media.timeline";
                     media = std::make_unique<MediaProxy>(
                         result.at("playlist_url").get<std::string>(), media_duration);
+                    stage = "video.add";
+                    log_event("video.add.begin");
                     command(m,
                             {"video-add", media->url(), "select", "modeld RIFE 4.26 Heavy FP32"});
+                    log_event("video.add.ready", {{"tracks", log_tracks(tracks(m))}});
                     activating = false;
                     mpv_set_property(m, "pause", MPV_FORMAT_FLAG, &activation_pause);
                     osd(m, "RIFE 4.26 Heavy FP32 · 60 fps");
                     heartbeat = Clock::now();
+                    stage = "playback";
                 }
                 bool buffer_changed = false;
                 int paused = 0, seeking = 0;
@@ -235,11 +287,13 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                             buffer_changed = true;
                             mpv_set_property(m, "pause", MPV_FORMAT_FLAG, &paused);
                             osd(m, "远端视频缓冲中…");
+                            log_event("buffer.wait", {{"position", position}, {"ahead", ahead}});
                         } else if (buffering && ahead >= std::min(8.0, remaining) - 0.05) {
                             buffering = false;
                             paused = 0;
                             buffer_changed = true;
                             mpv_set_property(m, "pause", MPV_FORMAT_FLAG, &paused);
+                            log_event("buffer.resume", {{"position", position}, {"ahead", ahead}});
                         }
                     }
                 }
@@ -252,15 +306,18 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                     heartbeat = Clock::now();
                 }
             } catch (const std::exception &error) {
+                log_event("error", {{"stage", stage}, {"error", error.what()}});
                 std::cerr << "[modeld] " << error.what() << '\n';
                 restore();
-                osd(m, std::string("RIFE: ") + error.what());
+                osd(m, std::string("RIFE: ") + error.what() + "\n详情：modelctl logs", 10000);
             }
         }
     } catch (const std::exception &e) {
+        log_event("fatal", {{"stage", stage}, {"error", e.what()}});
         std::cerr << "[modeld] " << e.what() << '\n';
-        osd(m, std::string("RIFE: ") + e.what());
+        osd(m, std::string("RIFE: ") + e.what() + "\n详情：modelctl logs", 10000);
     }
     clear();
+    log_event("plugin.stop");
     return 0;
 }

@@ -1,0 +1,211 @@
+{
+  "date": "2026-11-17",
+  "model": "RIFE 4.26 Heavy FP32",
+  "model_sha256": "990ceae958e3da49a112125fa2ba3d1bcc361e97012e609492e37f33527d7955",
+  "gpu": "NVIDIA GeForce RTX 4080 SUPER",
+  "cuda_driver_api_version": 13050,
+  "cuda_runtime_api_version": 13040,
+  "configuration": {
+    "precision": "FP32",
+    "tf32": false,
+    "nvidia_tf32_override": 0,
+    "workspace_gib": 4,
+    "auxiliary_streams": 0,
+    "execution_contexts": 2,
+    "cuda_graphs": true,
+    "warmup_seconds_at_least": 3
+  },
+  "timing_scope": "Inference graphs; separately RGB upload + GPU preprocessing + inference + NV12. Excludes decoding, NVENC and network.",
+  "speed_input": "The first natural frame pair at each native resolution, fixed at t=0.5; data already resident for graph-only timings.",
+  "performance": [
+    {
+      "backend": "rtx",
+      "sdk_version": "1.7.1.116",
+      "width": 1920,
+      "height": 1080,
+      "process_restarts": 2,
+      "trials": 6,
+      "latency_samples": 600,
+      "single_stream_median_ms": 18.069503784179688,
+      "single_stream_p95_ms": 18.137088775634766,
+      "dual_stream_fps": 58.01810515784439,
+      "gpu_pipeline_fps": 57.45388147458394,
+      "gpu_pipeline_fps_range": [
+        57.33204811851738,
+        57.60982287853043
+      ],
+      "gpu_allocation_delta_mib": 2100,
+      "cached_context_warmup_graph_prepare_seconds": 6.4619541730000005,
+      "cached_engine_load_seconds": 0.104183951,
+      "source_files": [
+        "performance/rtx-1080-r1.json",
+        "performance/rtx-1080-r2.json"
+      ],
+      "new_engine_build_seconds": 0.715787061,
+      "new_engine_context_warmup_graph_prepare_seconds": 6.609541274,
+      "engine_bytes": 28315068
+    },
+    {
+      "backend": "trt",
+      "sdk_version": "11.4.0.106",
+      "width": 1920,
+      "height": 1080,
+      "process_restarts": 2,
+      "trials": 6,
+      "latency_samples": 600,
+      "single_stream_median_ms": 21.188608169555664,
+      "single_stream_p95_ms": 21.238784790039062,
+      "dual_stream_fps": 46.713721742552735,
+      "gpu_pipeline_fps": 46.08791412262921,
+      "gpu_pipeline_fps_range": [
+        46.07727757809373,
+        46.09819779595882
+      ],
+      "gpu_allocation_delta_mib": 3284,
+      "cached_context_warmup_graph_prepare_seconds": 1.1012492859999998,
+      "cached_engine_load_seconds": 1.1079090360000001,
+      "source_files": [
+        "performance/trt-1080-r1.json",
+        "performance/trt-1080-r2.json"
+      ],
+      "new_engine_build_seconds": 24.59954011,
+      "new_engine_context_warmup_graph_prepare_seconds": 0.999747262,
+      "engine_bytes": 322758660
+    },
+    {
+      "backend": "rtx",
+      "sdk_version": "1.7.1.116",
+      "width": 1280,
+      "height": 720,
+      "process_restarts": 2,
+      "trials": 6,
+      "latency_samples": 600,
+      "single_stream_median_ms": 8.860671997070312,
+      "single_stream_p95_ms": 8.897536277770996,
+      "dual_stream_fps": 123.90988941097513,
+      "gpu_pipeline_fps": 123.67223769730674,
+      "gpu_pipeline_fps_range": [
+        123.48946360605342,
+        124.14634752327038
+      ],
+      "gpu_allocation_delta_mib": 1018,
+      "cached_context_warmup_graph_prepare_seconds": 5.8251222335,
+      "cached_engine_load_seconds": 0.10483331800000001,
+      "source_files": [
+        "performance/rtx-720-r1.json",
+        "performance/rtx-720-r2.json"
+      ],
+      "new_engine_build_seconds": 0.71131668,
+      "new_engine_context_warmup_graph_prepare_seconds": 6.211243127,
+      "engine_bytes": 28307884
+    },
+    {
+      "backend": "trt",
+      "sdk_version": "11.4.0.106",
+      "width": 1280,
+      "height": 720,
+      "process_restarts": 2,
+      "trials": 6,
+      "latency_samples": 600,
+      "single_stream_median_ms": 9.373696327209473,
+      "single_stream_p95_ms": 9.40441608428955,
+      "dual_stream_fps": 106.43803804701102,
+      "gpu_pipeline_fps": 107.41564135400004,
+      "gpu_pipeline_fps_range": [
+        107.14939968520191,
+        107.44336125897318
+      ],
+      "gpu_allocation_delta_mib": 1502,
+      "cached_context_warmup_graph_prepare_seconds": 0.615987809,
+      "cached_engine_load_seconds": 0.594783948,
+      "source_files": [
+        "performance/trt-720-r1.json",
+        "performance/trt-720-r2.json"
+      ],
+      "new_engine_build_seconds": 21.685350963,
+      "new_engine_context_warmup_graph_prepare_seconds": 0.507707545,
+      "engine_bytes": 172680300
+    }
+  ],
+  "optimization_level_5": {
+    "backend": "trt",
+    "sdk_version": "11.4.0.106",
+    "width": 1920,
+    "height": 1080,
+    "process_restarts": 2,
+    "trials": 6,
+    "latency_samples": 600,
+    "single_stream_median_ms": 21.130239486694336,
+    "single_stream_p95_ms": 21.178367614746094,
+    "dual_stream_fps": 46.821509765214124,
+    "gpu_pipeline_fps": 46.191953271463376,
+    "gpu_pipeline_fps_range": [
+      46.139309208505175,
+      46.214408493788284
+    ],
+    "gpu_allocation_delta_mib": 3284,
+    "cached_context_warmup_graph_prepare_seconds": 1.098439387,
+    "cached_engine_load_seconds": 1.1170302815,
+    "source_files": [
+      "optimization-level-5/trt-1080-opt5-r1.json",
+      "optimization-level-5/trt-1080-opt5-r2.json"
+    ],
+    "new_engine_build_seconds": 89.698968118,
+    "builder_optimization_level": 5
+  },
+  "quality": {
+    "max_8bit_channel_difference": 1,
+    "max_abs": 0.0038084089756011963,
+    "max_changed_8bit_channels_fraction": 0.0014750514403292182,
+    "max_mae": 0.000005856948914154697,
+    "min_cross_psnr_db": 91.2701416844775,
+    "min_cross_ssim_y": 0.9999995009559562,
+    "samples": 30,
+    "max_held_out_reference_psnr_difference_db": 0.000024006856211400418,
+    "max_held_out_reference_ssim_difference": 3.6673358172478743e-7
+  },
+  "background_service": {
+    "process": "modeld",
+    "samples": 381,
+    "detected_gpu_active_samples": 0
+  },
+  "environment": {
+    "date": "2026-11-17",
+    "host": "s8030",
+    "driver_version": "620.70.06",
+    "cuda_compiler_version": "13.4.59",
+    "cuda_runtime_version": "13.4.49",
+    "gpu_memory_mib": 32760,
+    "installed_sdk_bytes": {
+      "trt": 4762473329,
+      "rtx": 242907933
+    },
+    "production_service": "modeld 0.1.5; remained active with no detected GPU compute during baseline timing samples",
+    "cold_plan_definition": "No benchmark plan file; records engine build separately from GPU-context/JIT/warmup/graph-capture preparation; not a cold OS/filesystem measurement",
+    "pipeline_upload": "Both RGB images uploaded for each new inference; no CPU decode, NVENC, network or original-frame bypass in this timing",
+    "baseline_builder_optimization": {
+      "trt": 3,
+      "rtx": "JIT default"
+    },
+    "baseline_harness_commit": "94a84ad",
+    "optimization_level_5_outputs_bitwise_identical_to_level_3": true,
+    "active_baseline_gpu_telemetry": {
+      "samples": 601,
+      "temperature_celsius_range": [
+        47.16,
+        69.93
+      ],
+      "sm_clock_mhz_range": [
+        2550,
+        2760
+      ],
+      "power_limit_watts_range": [
+        320,
+        320
+      ]
+    },
+    "rgb_conversion_ffmpeg": "8.1.3",
+    "rgb_conversion_host_architecture": "aarch64",
+    "telemetry_normalization": "Trailing whitespace removed; numeric records and column spacing preserved"
+  }
+}

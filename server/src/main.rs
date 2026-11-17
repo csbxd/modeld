@@ -244,9 +244,13 @@ impl App {
 }
 
 fn catalog() -> Value {
-    json!({"object":"list","data":[{"id":MODEL,"task":"frame_interpolation","version":"4.26","variant":"heavy","precision":"fp32","tf32":false,"backend":"tensorrt-rtx","state":"ready","max_width":1920,"max_height":1920,"max_long_side":1920,"max_short_side":1080,"max_pixels":2073600,"target_fps":60}]})
+    json!({"object":"list","data":[{"id":MODEL,"task":"frame_interpolation","version":"4.26","variant":"heavy","precision":"fp32","tf32":false,"backend":"tensorrt-rtx","state":"ready","max_width":1920,"max_height":1920,"max_long_side":1920,"max_short_side":1080,"max_pixels":2073600,"target_fps":60,"output_modes":["video","main"]}]})
 }
+#[cfg(test)]
 fn playlist(duration: f64, seconds: i32) -> Result<String> {
+    media_playlist(duration, seconds, false)
+}
+fn media_playlist(duration: f64, seconds: i32, main: bool) -> Result<String> {
     if !duration.is_finite()
         || duration <= 0.0
         || duration > 604800.0
@@ -257,10 +261,15 @@ fn playlist(duration: f64, seconds: i32) -> Result<String> {
     let frames = (duration * 60.0).ceil() as i64;
     let size = 60 * seconds as i64;
     let mut out=format!("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:{seconds}\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-INDEPENDENT-SEGMENTS\n");
+    if main {
+        out = out.replace("VERSION:3", "VERSION:6");
+        out += "#EXT-X-MAP:URI=\"init.mkv\"\n";
+    }
     for (index, begin) in (0..frames).step_by(size as usize).enumerate() {
         out += &format!(
-            "#EXTINF:{:.6},\nsegments/{index}.ts\n",
-            (frames - begin).min(size) as f64 / 60.0
+            "#EXTINF:{:.6},\nsegments/{index}.{}\n",
+            (frames - begin).min(size) as f64 / 60.0,
+            if main { "mkv" } else { "ts" }
         )
     }
     out += "#EXT-X-ENDLIST\n";
@@ -279,7 +288,7 @@ async fn models(State(app): State<Arc<App>>, headers: HeaderMap) -> Result<Json<
     app.authorize(&headers)?;
     Ok(Json(catalog()))
 }
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct CreateSession {
     source_url: String,
     #[serde(default)]
@@ -292,6 +301,14 @@ struct CreateSession {
     task: Option<String>,
     #[serde(default)]
     target_fps: Option<i32>,
+    #[serde(default)]
+    output_mode: Option<String>,
+    #[serde(default)]
+    audio_source_url: Option<String>,
+    #[serde(default)]
+    include_audio: Option<bool>,
+    #[serde(default)]
+    include_subtitles: Option<bool>,
 }
 impl CreateSession {
     fn http_headers(&self) -> Result<String> {
@@ -333,6 +350,19 @@ impl CreateSession {
         Ok(result)
     }
     fn validate(&self) -> Result<()> {
+        if !matches!(
+            self.output_mode.as_deref().unwrap_or("video"),
+            "video" | "main"
+        ) {
+            return Err(ApiError::new(422, "Unsupported output mode"));
+        }
+        if let Some(url) = self
+            .audio_source_url
+            .as_deref()
+            .filter(|url| !url.is_empty())
+        {
+            source_url(url)?;
+        }
         if self.model.as_deref().unwrap_or(MODEL) != MODEL {
             return Err(ApiError::new(404, "Unknown model"));
         }
@@ -386,6 +416,11 @@ async fn create(
     let cancellation = Cancellation::new()?;
     let mut probe_guard = ProbeGuard(Some(cancellation.clone()));
     let source_headers = body.http_headers()?;
+    let media_options = json!({"output_mode": body.output_mode.as_deref().unwrap_or("video"),
+        "audio_source_url": body.audio_source_url.as_deref().unwrap_or(""),
+        "include_audio": body.include_audio.unwrap_or(true),
+        "include_subtitles": body.include_subtitles.unwrap_or(true)})
+    .to_string();
     let mut sources = vec![body.source_url];
     sources.extend(body.source_backups);
     let sources =
@@ -405,6 +440,7 @@ async fn create(
             &native::SourceControl {
                 timeout_seconds: source_timeout,
                 cancellation,
+                media_options,
             },
         )
         .map(|video| (video, permit))
@@ -443,6 +479,7 @@ async fn create(
     );
     let id = random_id()?;
     let info = video.info;
+    let media_metadata = video.metadata.clone();
     let (paused, _) = watch::channel(false);
     let session = Arc::new(Session {
         video,
@@ -457,7 +494,7 @@ async fn create(
     Ok((
         StatusCode::CREATED,
         Json(
-            json!({"id":id,"model":MODEL,"task":"frame_interpolation","playlist_url":format!("{}/v1/sessions/{id}/index.m3u8",app.config.public_url.trim_end_matches('/')),"width":info.width,"height":info.height,"source_fps":info.source_fps,"duration":info.duration,"target_fps":60,"encoder":app.config.encoder,"encoder_qp":qp}),
+            json!({"id":id,"model":MODEL,"task":"frame_interpolation","playlist_url":format!("{}/v1/sessions/{id}/index.m3u8",app.config.public_url.trim_end_matches('/')),"width":info.width,"height":info.height,"source_fps":info.source_fps,"duration":info.duration,"target_fps":60,"encoder":app.config.encoder,"encoder_qp":qp,"media":media_metadata}),
         ),
     ))
 }
@@ -495,9 +532,24 @@ async fn index(State(app): State<Arc<App>>, Path(id): Path<String>) -> Result<Re
             ("content-type", "application/vnd.apple.mpegurl"),
             ("cache-control", "private, no-store"),
         ],
-        playlist(s.video.info.duration, app.config.segment_seconds)?,
+        media_playlist(
+            s.video.info.duration,
+            app.config.segment_seconds,
+            !s.video.header.is_empty(),
+        )?,
     )
         .into_response())
+}
+async fn init_segment(State(app): State<Arc<App>>, Path(id): Path<String>) -> Result<Response> {
+    let s = app.session(&id)?;
+    if s.video.header.is_empty() {
+        return Err(ApiError::new(404, "No initialization segment"));
+    }
+    Ok(Response::builder()
+        .header("content-type", "video/x-matroska")
+        .header("cache-control", "private, max-age=3600")
+        .body(Body::from(s.video.header.clone()))
+        .unwrap())
 }
 async fn segment(
     State(app): State<Arc<App>>,
@@ -505,20 +557,16 @@ async fn segment(
 ) -> Result<Response> {
     let s = app.session(&id)?;
     let sequence = file
-        .strip_suffix(".ts")
+        .strip_suffix(if s.video.header.is_empty() {
+            ".ts"
+        } else {
+            ".mkv"
+        })
         .and_then(|v| v.parse::<i64>().ok())
         .ok_or_else(|| ApiError::new(404, "Segment does not exist"))?;
-    let mut paused = s.paused.subscribe();
-    loop {
-        let value = *paused.borrow_and_update();
-        if !value {
-            break;
-        }
-        paused
-            .changed()
-            .await
-            .map_err(|_| ApiError::new(410, "Session closed"))?;
-    }
+    // Explicit player reads must also complete while the user is paused: mpv
+    // fills its own bounded forward cache in that state. Pause only suppresses
+    // unsolicited server prefetch below, never HTTP backpressure itself.
     let mut result = app.segment(&s, sequence)?;
     let data = loop {
         if let Some(value) = result.borrow_and_update().clone() {
@@ -535,7 +583,14 @@ async fn segment(
         let _ = app.segment(&s, sequence + 1);
     }
     Ok(Response::builder()
-        .header("content-type", "video/MP2T")
+        .header(
+            "content-type",
+            if s.video.header.is_empty() {
+                "video/MP2T"
+            } else {
+                "video/x-matroska"
+            },
+        )
         .header("cache-control", "private, max-age=60")
         .header("x-modeld-frames", data.frames.to_string())
         .header("x-modeld-render-seconds", format!("{:.6}", data.seconds))
@@ -550,6 +605,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/v1/sessions/{id}", axum::routing::delete(remove))
         .route("/v1/sessions/{id}/heartbeat", post(heartbeat))
         .route("/v1/sessions/{id}/index.m3u8", get(index))
+        .route("/v1/sessions/{id}/init.mkv", get(init_segment))
         .route("/v1/sessions/{id}/segments/{file}", get(segment))
         .layer(DefaultBodyLimit::max(65536))
         .with_state(app)
@@ -643,6 +699,10 @@ mod tests {
         assert!(p.ends_with("#EXT-X-ENDLIST\n"));
         assert!(playlist(f64::NAN, 2).is_err());
         assert!(playlist(-1.0, 2).is_err());
+        let main = media_playlist(4.01, 2, true).unwrap();
+        assert!(main.contains("#EXT-X-MAP:URI=\"init.mkv\""));
+        assert!(main.contains("#EXTINF:0.016667,\nsegments/2.mkv"));
+        assert!(!main.contains(".ts"));
     }
     #[test]
     fn unsupported_tasks_are_not_advertised() {
@@ -657,6 +717,7 @@ mod tests {
             model: None,
             task: Some("llm".into()),
             target_fps: None,
+            ..Default::default()
         };
         assert_eq!(body.validate().unwrap_err().status, 501);
         body.task = None;
@@ -668,6 +729,17 @@ mod tests {
         assert!(source_url("file:///etc/passwd").is_err());
         assert!(source_url("http://user:secret@host/video").is_err());
         assert!(source_url("http://100.123.1.2:1234/source/opaque").is_ok());
+        let mut body: CreateSession = serde_json::from_value(json!({
+            "source_url":"https://cdn.example/video.m4s", "output_mode":"main",
+            "audio_source_url":"https://cdn.example/audio.m4s"
+        }))
+        .unwrap();
+        assert!(body.validate().is_ok());
+        body.audio_source_url = Some("file:///etc/passwd".into());
+        assert!(body.validate().is_err());
+        body.audio_source_url = None;
+        body.output_mode = Some("unknown".into());
+        assert!(body.validate().is_err());
     }
     #[test]
     fn source_headers_preserve_referer_without_request_injection() {

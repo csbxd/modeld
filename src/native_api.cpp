@@ -45,6 +45,7 @@ struct Context {
 struct Video {
     std::shared_ptr<std::atomic<bool>> cancelled;
     std::unique_ptr<modeld::Video> media;
+    std::string metadata;
 };
 struct CancelToken {
     std::shared_ptr<std::atomic<bool>> value = std::make_shared<std::atomic<bool>>(false);
@@ -74,25 +75,56 @@ void *modeld_cancel_token_create(void) {
         return nullptr;
     }
 }
-void modeld_cancel_token_set(void *token) { static_cast<CancelToken *>(token)->value->store(true); }
-void modeld_cancel_token_free(void *token) { delete static_cast<CancelToken *>(token); }
+void modeld_cancel_token_set(void *token) {
+    static_cast<CancelToken *>(token)->value->store(true);
+}
+void modeld_cancel_token_free(void *token) {
+    delete static_cast<CancelToken *>(token);
+}
 void *modeld_video_open(void *context, const char *sources_json, const char *source_headers,
                         int seconds, int qp, const char *encoder, int source_timeout_seconds,
-                        void *cancel_token, ModeldVideoInfo *info) {
+                        void *cancel_token, const char *media_options, ModeldVideoInfo *info) {
     try {
         auto *c = static_cast<Context *>(context);
         auto v = std::make_unique<Video>();
         v->cancelled = static_cast<CancelToken *>(cancel_token)->value;
+        const auto options = modeld::Json::parse(media_options ? media_options : "{}");
+        modeld::MediaOptions output;
+        output.main_stream = options.value("output_mode", std::string("video")) == "main";
+        output.include_audio = options.value("include_audio", true);
+        output.include_subtitles = options.value("include_subtitles", true);
+        output.audio_url = options.value("audio_source_url", std::string{});
         v->media = std::make_unique<modeld::Video>(
             modeld::Json::parse(sources_json).get<std::vector<std::string>>(),
             source_headers ? source_headers : "", seconds, qp, encoder,
-            [c](int w, int h) { return c->get(w, h); }, v->cancelled, source_timeout_seconds);
+            [c](int w, int h) { return c->get(w, h); }, v->cancelled, source_timeout_seconds,
+            std::move(output));
+        v->metadata =
+            v->media->metadata().dump(-1, ' ', false, modeld::Json::error_handler_t::replace);
         auto i = v->media->info();
         *info = {i.width, i.height, i.duration, i.source_fps};
         return v.release();
     } catch (...) {
         error();
         return nullptr;
+    }
+}
+const char *modeld_video_metadata(void *video) {
+    return static_cast<Video *>(video)->metadata.c_str();
+}
+int modeld_video_header(void *video, ModeldSegment *out) {
+    try {
+        auto s = std::make_unique<modeld::Segment>();
+        s->bytes = static_cast<Video *>(video)->media->header();
+        out->data = s->bytes.data();
+        out->length = s->bytes.size();
+        out->frames = 0;
+        out->seconds = 0;
+        out->owner = s.release();
+        return 0;
+    } catch (...) {
+        error();
+        return -1;
     }
 }
 void modeld_video_cancel(void *video) {

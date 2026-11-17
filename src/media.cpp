@@ -53,6 +53,26 @@ struct Packet {
         av_packet_free(&p);
     }
 };
+using PacketRef = std::shared_ptr<AVPacket>;
+PacketRef copy_packet(const AVPacket *packet) {
+    auto *copy = av_packet_clone(packet);
+    if (!copy)
+        throw std::bad_alloc();
+    return {copy, [](AVPacket *p) { av_packet_free(&p); }};
+}
+struct CopyTrack {
+    AVCodecParameters *parameters = avcodec_parameters_alloc();
+    AVDictionary *metadata = nullptr;
+    AVRational time_base{};
+    int source_index = -1, disposition = 0;
+    bool separate = false;
+    double origin = 0, latest_end = -1;
+    std::deque<PacketRef> packets;
+    ~CopyTrack() {
+        avcodec_parameters_free(&parameters);
+        av_dict_free(&metadata);
+    }
+};
 struct Mux {
     AVFormatContext *format = nullptr;
     AVIOContext *io = nullptr;
@@ -82,6 +102,7 @@ struct Mux {
 } // namespace
 struct Video::Impl {
     AVFormatContext *input = nullptr;
+    AVFormatContext *audio_input = nullptr;
     AVCodecContext *decoder = nullptr;
     AVCodecContext *encoder = nullptr;
     AVBufferRef *device = nullptr;
@@ -106,6 +127,11 @@ struct Video::Impl {
     const char *phase = "Source probe";
     std::shared_ptr<Image> first, last;
     Frame rgb_frame;
+    MediaOptions options;
+    std::vector<std::unique_ptr<CopyTrack>> copy_tracks;
+    std::deque<PacketRef> queued_video;
+    std::vector<uint8_t> init_header;
+    bool audio_eof = false;
     explicit Impl(int seconds, int quantizer, std::string codec, RifeFactory f,
                   std::shared_ptr<std::atomic<bool>> c, int timeout_seconds)
         : segment_seconds(seconds), qp(quantizer), encoder_name(std::move(codec)),
@@ -117,6 +143,7 @@ struct Video::Impl {
         sws_freeContext(sws);
         avcodec_free_context(&decoder);
         avformat_close_input(&input);
+        avformat_close_input(&audio_input);
     }
     void check() {
         if (cancelled->load())
@@ -140,6 +167,124 @@ struct Video::Impl {
     static int interrupt(void *opaque) {
         return static_cast<Impl *>(opaque)->interrupted() ? 1 : 0;
     }
+    void capture_packet(const AVPacket *packet, bool separate) {
+        for (auto &track : copy_tracks) {
+            if (track->separate != separate || track->source_index != packet->stream_index ||
+                track->parameters->codec_type == AVMEDIA_TYPE_ATTACHMENT)
+                continue;
+            if (packet->flags & AV_PKT_FLAG_CORRUPT)
+                throw SourceError(502, "Incomplete source audio/subtitle packet");
+            const int64_t timestamp = packet->pts != AV_NOPTS_VALUE ? packet->pts : packet->dts;
+            if (timestamp == AV_NOPTS_VALUE)
+                continue;
+            const double start = timestamp * av_q2d(track->time_base) - track->origin;
+            track->latest_end =
+                std::max(track->latest_end,
+                         start + std::max<int64_t>(packet->duration, 0) * av_q2d(track->time_base));
+            if (track->parameters->codec_type == AVMEDIA_TYPE_SUBTITLE &&
+                std::any_of(track->packets.begin(), track->packets.end(), [&](const auto &p) {
+                    return p->pts == packet->pts && p->duration == packet->duration &&
+                           p->size == packet->size && !std::memcmp(p->data, packet->data, p->size);
+                }))
+                continue;
+            if (track->packets.size() >= 8192)
+                throw SourceError(502, "Source media interleaving exceeds the packet limit");
+            track->packets.push_back(copy_packet(packet));
+        }
+    }
+    void configure_passthrough() {
+        if (!options.main_stream)
+            return;
+        avformat_close_input(&audio_input);
+        audio_eof = false;
+        if (options.include_audio && !options.audio_url.empty()) {
+            audio_input = avformat_alloc_context();
+            if (!audio_input)
+                throw std::bad_alloc();
+            audio_input->interrupt_callback = {Impl::interrupt, this};
+            AVDictionary *settings = nullptr;
+            av_dict_set(&settings, "rw_timeout", "8000000", 0);
+            av_dict_set(&settings, "reconnect", "1", 0);
+            av_dict_set(&settings, "reconnect_on_network_error", "1", 0);
+            av_dict_set(&settings, "reconnect_max_retries", "2", 0);
+            av_dict_set(&settings, "protocol_whitelist", "http,https,tcp,tls,crypto", 0);
+            if (!source_headers.empty())
+                av_dict_set(&settings, "headers", source_headers.c_str(), 0);
+            const int result =
+                avformat_open_input(&audio_input, options.audio_url.c_str(), nullptr, &settings);
+            av_dict_free(&settings);
+            sourcecheck(result, "Open source audio");
+            sourcecheck(avformat_find_stream_info(audio_input, nullptr), "Probe source audio");
+        }
+        if (!copy_tracks.empty())
+            return;
+        auto add = [&](AVFormatContext *format, bool separate) {
+            if (!format)
+                return;
+            for (unsigned n = 0; n < format->nb_streams; ++n) {
+                const auto *stream = format->streams[n];
+                const auto type = stream->codecpar->codec_type;
+                const bool audio = type == AVMEDIA_TYPE_AUDIO && options.include_audio &&
+                                   (separate || options.audio_url.empty());
+                const bool subtitle =
+                    type == AVMEDIA_TYPE_SUBTITLE && options.include_subtitles && !separate;
+                const bool attachment =
+                    type == AVMEDIA_TYPE_ATTACHMENT && options.include_subtitles && !separate;
+                if (!audio && !subtitle && !attachment)
+                    continue;
+                auto track = std::make_unique<CopyTrack>();
+                if (!track->parameters)
+                    throw std::bad_alloc();
+                avcheck(avcodec_parameters_copy(track->parameters, stream->codecpar),
+                        "Copy source track parameters");
+                av_dict_copy(&track->metadata, stream->metadata, 0);
+                track->source_index = n;
+                track->time_base = stream->time_base;
+                track->disposition = stream->disposition;
+                track->separate = separate;
+                track->origin = separate && format->start_time != AV_NOPTS_VALUE
+                                    ? format->start_time / static_cast<double>(AV_TIME_BASE)
+                                    : origin;
+                copy_tracks.push_back(std::move(track));
+            }
+        };
+        add(input, false);
+        add(audio_input, true);
+    }
+    void collect_passthrough(double end) {
+        for (const bool separate : {false, true}) {
+            auto *format = separate ? audio_input : input;
+            if (!format)
+                continue;
+            for (;;) {
+                const bool ready =
+                    std::all_of(copy_tracks.begin(), copy_tracks.end(), [&](const auto &t) {
+                        return t->separate != separate ||
+                               t->parameters->codec_type != AVMEDIA_TYPE_AUDIO ||
+                               t->latest_end >= end - 0.0001;
+                    });
+                if (ready || (separate ? audio_eof : eof))
+                    break;
+                check();
+                Packet packet;
+                const int result = av_read_frame(format, packet.p);
+                if (result == AVERROR_EOF) {
+                    if (separate)
+                        audio_eof = true;
+                    else
+                        eof = true;
+                    break;
+                }
+                sourcecheck(result, "Read source audio packets");
+                if (queued_video.size() >= 4096)
+                    throw SourceError(502, "Source audio is too far behind the video");
+                if (!separate && packet.p->stream_index == stream)
+                    queued_video.push_back(copy_packet(packet.p));
+                else
+                    capture_packet(packet.p, separate);
+            }
+        }
+    }
     std::shared_ptr<Image> read_frame() {
         auto frame = new_frame();
         Packet packet;
@@ -155,7 +300,7 @@ struct Video::Impl {
             }
             if (r != AVERROR(EAGAIN))
                 sourcecheck(r, "Decode frame");
-            if (eof) {
+            if (eof && queued_video.empty()) {
                 if (flushed)
                     return nullptr;
                 sourcecheck(avcodec_send_packet(decoder, nullptr), "Flush decoder");
@@ -163,7 +308,15 @@ struct Video::Impl {
                 continue;
             }
             for (;;) {
-                r = av_read_frame(input, packet.p);
+                if (!queued_video.empty()) {
+                    av_packet_ref(packet.p, queued_video.front().get());
+                    queued_video.pop_front();
+                    r = 0;
+                } else {
+                    r = av_read_frame(input, packet.p);
+                    if (r >= 0 && packet.p->stream_index != stream)
+                        capture_packet(packet.p, false);
+                }
                 if (r == AVERROR_EOF) {
                     if (input->pb && input->pb->error < 0 && input->pb->error != AVERROR_EOF)
                         sourcecheck(input->pb->error, "Read source transport");
@@ -232,6 +385,18 @@ struct Video::Impl {
             static_cast<int64_t>((std::max(0.0, time) + origin) / av_q2d(video->time_base));
         sourcecheck(av_seek_frame(input, stream, target, AVSEEK_FLAG_BACKWARD), "Seek source");
         avcodec_flush_buffers(decoder);
+        queued_video.clear();
+        for (auto &track : copy_tracks) {
+            if (track->parameters->codec_type == AVMEDIA_TYPE_AUDIO)
+                track->packets.clear();
+            track->latest_end = -1;
+        }
+        if (audio_input) {
+            const auto target = static_cast<int64_t>(time * AV_TIME_BASE);
+            sourcecheck(av_seek_frame(audio_input, -1, target, AVSEEK_FLAG_BACKWARD),
+                        "Seek source audio");
+            audio_eof = false;
+        }
         eof = false;
         flushed = false;
         first = read_frame();
@@ -299,6 +464,7 @@ struct Video::Impl {
                  : video->start_time != AV_NOPTS_VALUE
                      ? video->start_time * av_q2d(video->time_base)
                      : 0;
+        configure_passthrough();
         // Native AV1 can be hardware-only; swscale requires software frames.
         const auto *codec = p->codec_id == AV_CODEC_ID_AV1
                                 ? avcodec_find_decoder_by_name("libdav1d")
@@ -364,6 +530,8 @@ struct Video::Impl {
         encoder->colorspace = AVCOL_SPC_BT709;
         encoder->color_range = AVCOL_RANGE_MPEG;
         encoder->sample_aspect_ratio = input->streams[stream]->sample_aspect_ratio;
+        if (options.main_stream)
+            encoder->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
         if (!encoder->sample_aspect_ratio.num)
             encoder->sample_aspect_ratio = {1, 1};
         AVDictionary *options = nullptr;
@@ -379,10 +547,105 @@ struct Video::Impl {
         av_dict_free(&options);
         avcheck(r, "Open NVENC encoder");
     }
+    void mux_header(Mux &mux) {
+        avcheck(avformat_alloc_output_context2(
+                    &mux.format, nullptr, options.main_stream ? "matroska" : "mpegts", nullptr),
+                "Create segment muxer");
+        auto *out = avformat_new_stream(mux.format, nullptr);
+        if (!out)
+            throw std::bad_alloc();
+        avcheck(avcodec_parameters_from_context(out->codecpar, encoder),
+                "Configure segment stream");
+        out->time_base = encoder->time_base;
+        out->avg_frame_rate = encoder->framerate;
+        if (options.main_stream) {
+            mux.format->flags |= AVFMT_FLAG_BITEXACT;
+            av_dict_copy(&mux.format->metadata, input->metadata, 0);
+            for (const auto &track : copy_tracks) {
+                auto *stream = avformat_new_stream(mux.format, nullptr);
+                if (!stream)
+                    throw std::bad_alloc();
+                avcheck(avcodec_parameters_copy(stream->codecpar, track->parameters),
+                        "Configure copied output track");
+                stream->codecpar->codec_tag = 0;
+                stream->time_base = track->time_base;
+                stream->disposition = track->disposition;
+                av_dict_copy(&stream->metadata, track->metadata, 0);
+            }
+        }
+        auto *buffer = static_cast<unsigned char *>(av_malloc(65536));
+        if (!buffer)
+            throw std::bad_alloc();
+        mux.io = avio_alloc_context(buffer, 65536, 1, &mux, nullptr, Mux::write, nullptr);
+        if (!mux.io) {
+            av_free(buffer);
+            throw std::bad_alloc();
+        }
+        mux.format->pb = mux.io;
+        mux.format->flags |= AVFMT_FLAG_CUSTOM_IO;
+        mux.format->max_delay = 0;
+        mux.format->avoid_negative_ts = AVFMT_AVOID_NEG_TS_DISABLED;
+        AVDictionary *settings = nullptr;
+        if (options.main_stream) {
+            av_dict_set(&settings, "live", "1", 0);
+            av_dict_set(&settings, "cluster_time_limit", "1000", 0);
+        } else {
+            av_dict_set(&settings, "mpegts_copyts", "1", 0);
+            av_dict_set(&settings, "mpegts_flags", "resend_headers+initial_discontinuity", 0);
+        }
+        const int result = avformat_write_header(mux.format, &settings);
+        av_dict_free(&settings);
+        avcheck(result, "Write segment header");
+        avio_flush(mux.io);
+        if (options.main_stream) {
+            // An empty, finite Cluster lets mpv probe the init fragment without
+            // reporting a truncated Matroska file. Subsequent clusters follow
+            // normally, with their original absolute timestamps.
+            constexpr uint8_t empty_cluster[] = {0x1f, 0x43, 0xb6, 0x75, 0x83, 0xe7, 0x81, 0x00};
+            mux.bytes.insert(mux.bytes.end(), std::begin(empty_cluster), std::end(empty_cluster));
+        }
+    }
+    void mux_passthrough(Mux &mux, double begin, double end) {
+        collect_passthrough(end);
+        for (size_t n = 0; n < copy_tracks.size(); ++n) {
+            auto &track = *copy_tracks[n];
+            auto *output = mux.format->streams[n + 1];
+            for (const auto &source : track.packets) {
+                const int64_t timestamp = source->pts != AV_NOPTS_VALUE ? source->pts : source->dts;
+                const double start = timestamp * av_q2d(track.time_base) - track.origin;
+                const double finish = start + source->duration * av_q2d(track.time_base);
+                if (start >= end || (track.parameters->codec_type == AVMEDIA_TYPE_AUDIO
+                                         ? (begin > 0 && start < begin - 0.0001)
+                                         : (source->duration > 0 && finish <= begin)))
+                    continue;
+                Packet packet;
+                avcheck(av_packet_ref(packet.p, source.get()), "Reference copied source packet");
+                const auto offset =
+                    static_cast<int64_t>(std::llround(track.origin / av_q2d(track.time_base)));
+                if (packet.p->pts != AV_NOPTS_VALUE)
+                    packet.p->pts -= offset;
+                if (packet.p->dts != AV_NOPTS_VALUE)
+                    packet.p->dts -= offset;
+                av_packet_rescale_ts(packet.p, track.time_base, output->time_base);
+                packet.p->stream_index = output->index;
+                avcheck(av_interleaved_write_frame(mux.format, packet.p),
+                        "Mux original audio/subtitle packet");
+            }
+            std::erase_if(track.packets, [&](const auto &p) {
+                const auto ts = p->pts != AV_NOPTS_VALUE ? p->pts : p->dts;
+                const double start = ts * av_q2d(track.time_base) - track.origin;
+                return track.parameters->codec_type == AVMEDIA_TYPE_AUDIO
+                           ? start < end
+                           : p->duration > 0 &&
+                                 start + p->duration * av_q2d(track.time_base) <= begin;
+            });
+        }
+    }
 };
 Video::Video(const std::vector<std::string> &sources, const std::string &source_headers,
              int seconds, int qp, const std::string &encoder, RifeFactory factory,
-             std::shared_ptr<std::atomic<bool>> cancelled, int source_timeout_seconds)
+             std::shared_ptr<std::atomic<bool>> cancelled, int source_timeout_seconds,
+             MediaOptions options)
     : impl(std::make_unique<Impl>(seconds, qp, encoder, std::move(factory), std::move(cancelled),
                                   source_timeout_seconds)) {
     if (sources.empty() || sources.size() > 9)
@@ -391,6 +654,10 @@ Video::Video(const std::vector<std::string> &sources, const std::string &source_
         if (!url.starts_with("http://") && !url.starts_with("https://"))
             throw Error(422, "source_url must be HTTP or HTTPS");
     auto &v = *impl;
+    v.options = std::move(options);
+    if (!v.options.audio_url.empty() && !v.options.audio_url.starts_with("http://") &&
+        !v.options.audio_url.starts_with("https://"))
+        throw Error(422, "Audio source must be HTTP(S)");
     if (source_timeout_seconds < 1 || source_timeout_seconds > 120)
         throw Error(422, "Source timeout must be between 1 and 120 seconds");
     v.deadline = Clock::now() + v.source_timeout;
@@ -412,11 +679,41 @@ Video::Video(const std::vector<std::string> &sources, const std::string &source_
                       << '\n';
         }
     }
+    if (v.options.main_stream) {
+        v.prepare_encoder();
+        Mux mux;
+        v.mux_header(mux);
+        v.init_header = std::move(mux.bytes);
+    }
     v.deadline = v.attempt_deadline = {};
 }
 Video::~Video() = default;
 MediaInfo Video::info() const {
     return impl->info;
+}
+nlohmann::json Video::metadata() const {
+    Json tracks = Json::array();
+    int audio = 0, subtitles = 0;
+    for (const auto &track : impl->copy_tracks) {
+        const auto type = track->parameters->codec_type;
+        if (type != AVMEDIA_TYPE_AUDIO && type != AVMEDIA_TYPE_SUBTITLE)
+            continue;
+        const auto *language = av_dict_get(track->metadata, "language", nullptr, 0);
+        const auto *title = av_dict_get(track->metadata, "title", nullptr, 0);
+        tracks.push_back({{"type", type == AVMEDIA_TYPE_AUDIO ? "audio" : "sub"},
+                          {"id", type == AVMEDIA_TYPE_AUDIO ? ++audio : ++subtitles},
+                          {"source_index", track->source_index},
+                          {"separate", track->separate},
+                          {"codec", avcodec_get_name(track->parameters->codec_id)},
+                          {"lang", language ? language->value : ""},
+                          {"title", title ? title->value : ""}});
+    }
+    return {{"output_mode", impl->options.main_stream ? "main" : "video"},
+            {"segment_extension", impl->options.main_stream ? "mkv" : "ts"},
+            {"tracks", tracks}};
+}
+std::vector<uint8_t> Video::header() const {
+    return impl->init_header;
 }
 Segment Video::render(int64_t sequence) {
     auto started = Clock::now();
@@ -425,7 +722,9 @@ Segment Video::render(int64_t sequence) {
     v.deadline = Clock::now() + v.source_timeout;
     struct DeadlineReset {
         Impl &v;
-        ~DeadlineReset() { v.deadline = v.attempt_deadline = {}; }
+        ~DeadlineReset() {
+            v.deadline = v.attempt_deadline = {};
+        }
     } reset{v};
     v.check();
     int64_t begin = sequence * 60 * v.segment_seconds,
@@ -444,32 +743,13 @@ Segment Video::render(int64_t sequence) {
         if (!v.rife)
             v.rife = v.factory(v.info.width, v.info.height);
         Mux mux;
-        avcheck(avformat_alloc_output_context2(&mux.format, nullptr, "mpegts", nullptr),
-                "Create segment muxer");
-        auto *out = avformat_new_stream(mux.format, nullptr);
-        if (!out)
-            throw std::bad_alloc();
-        avcheck(avcodec_parameters_from_context(out->codecpar, v.encoder),
-                "Configure segment stream");
-        out->time_base = v.encoder->time_base;
-        auto *buffer = static_cast<unsigned char *>(av_malloc(65536));
-        if (!buffer)
-            throw std::bad_alloc();
-        mux.io = avio_alloc_context(buffer, 65536, 1, &mux, nullptr, Mux::write, nullptr);
-        if (!mux.io) {
-            av_free(buffer);
-            throw std::bad_alloc();
+        v.mux_header(mux);
+        auto *out = mux.format->streams[0];
+        if (v.options.main_stream) {
+            if (mux.bytes != v.init_header)
+                throw Error(502, "Output track header changed during playback");
+            mux.bytes.clear();
         }
-        mux.format->pb = mux.io;
-        mux.format->flags |= AVFMT_FLAG_CUSTOM_IO;
-        mux.format->max_delay = 0;
-        mux.format->avoid_negative_ts = AVFMT_AVOID_NEG_TS_DISABLED;
-        AVDictionary *options = nullptr;
-        av_dict_set(&options, "mpegts_copyts", "1", 0);
-        av_dict_set(&options, "mpegts_flags", "resend_headers+initial_discontinuity", 0);
-        int r = avformat_write_header(mux.format, &options);
-        av_dict_free(&options);
-        avcheck(r, "Write segment header");
         struct Pending {
             Frame frame;
             int slot;
@@ -537,6 +817,8 @@ Segment Video::render(int64_t sequence) {
         }
         while (!pending.empty())
             finish();
+        if (v.options.main_stream)
+            v.mux_passthrough(mux, begin / 60.0, end / 60.0);
         if (packets != end - begin)
             throw Error(500, "NVENC output was delayed; zero-latency configuration is required");
         avcheck(av_write_trailer(mux.format), "Finish segment");

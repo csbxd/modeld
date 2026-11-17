@@ -51,6 +51,8 @@ int main() {
                   "DASH selected HEVC program and length-escaped URL");
             check(resolved_video_url(dash, {{"program-id", 1}}) == video_b,
                   "DASH selected AVC program with the same title");
+            check(resolved_track_url(dash, {{"id", 1}}, "audio") == "https://cdn.example/audio.m4s",
+                  "DASH audio is resolved independently from the chosen video program");
             check(resolved_video_url(video_a, Json::object()) == video_a,
                   "direct media URLs are preserved");
             for (const auto &unsupported :
@@ -229,12 +231,55 @@ int main() {
                 check(proxy.buffered_ahead(0) >= 2, "proxy tracks completed video");
                 auto seek = client.Get(base + "segments/12.ts");
                 check(seek && seek->body == "segment-12", "proxy cancels stale prefetch on seek");
+                auto back = client.Get(base + "segments/0.ts");
+                check(back && back->body == "segment-0" && attempts == 3,
+                      "completed chunks survive a distant seek without another download");
                 auto invalid = client.Get(base + "segments/99.ts");
                 check(invalid && invalid->status == 404, "proxy rejects out-of-range segments");
                 auto missing = client.Get(base + "segments/9.ts");
                 check(missing && missing->status == 503 &&
                           proxy.failure().find("404") != std::string::npos,
                       "terminal transfer errors retain the upstream HTTP status");
+            }
+            upstream.stop();
+            listener.join();
+        }
+        {
+            httplib::Server upstream;
+            std::atomic<int> first_reads{0};
+            upstream.Get("/main/index.m3u8", [](const auto &, auto &res) {
+                res.set_content("#EXTM3U\n#EXT-X-TARGETDURATION:2\n"
+                                "#EXT-X-MAP:URI=\"init.mkv\"\n#EXT-X-ENDLIST\n",
+                                "application/vnd.apple.mpegurl");
+            });
+            upstream.Get("/main/init.mkv", [](const auto &, auto &res) {
+                res.set_content("compatible-tracks", "video/x-matroska");
+            });
+            upstream.Get(R"(/main/segments/([0-9]+)\.mkv)", [&](const auto &req, auto &res) {
+                if (req.matches[1] == "0")
+                    ++first_reads;
+                res.set_content("cluster-" + req.matches[1].str(), "video/x-matroska");
+            });
+            const int port = upstream.bind_to_any_port("127.0.0.1");
+            std::thread listener([&] { upstream.listen_after_bind(); });
+            const auto origin = "http://127.0.0.1:" + std::to_string(port) + "/main/index.m3u8";
+            std::shared_ptr<MediaProxy::Cache> saved;
+            for (int pass = 0; pass < 2; ++pass) {
+                MediaProxy proxy(origin, 4.01, Json::object(), {}, saved);
+                const auto url = proxy.url();
+                const auto split = url.find('/', 7);
+                httplib::Client client(url.substr(0, split));
+                auto path = url.substr(split);
+                auto edl = client.Get(path);
+                check(edl && edl->body.starts_with("# mpv EDL v0\n") &&
+                          edl->body.find("!mp4_dash,init=") != std::string::npos &&
+                          edl->body.find("length=0.016666667") != std::string::npos,
+                      "main media uses one mpv DASH timeline including the fractional final frame");
+                path.erase(path.rfind('/') + 1);
+                auto chunk = client.Get(path + "segments/0.mkv");
+                check(chunk && chunk->body == "cluster-0" && first_reads == 1,
+                      "main-media cache survives toggling with matching initialization tracks");
+                saved = proxy.saved_cache();
             }
             upstream.stop();
             listener.join();

@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <deque>
 #include <future>
+#include <iomanip>
 #include <map>
 #include <mutex>
 #include <set>
@@ -11,12 +12,23 @@
 #include <thread>
 
 namespace modeld {
+struct MediaProxy::Cache {
+    struct Saved {
+        int64_t index;
+        uint64_t used;
+        std::shared_ptr<std::string> bytes;
+    };
+    std::string init;
+    std::vector<Saved> entries;
+};
 struct MediaProxy::Impl {
     using Bytes = std::shared_ptr<std::string>;
     struct Entry {
         std::promise<Bytes> promise;
         std::shared_future<Bytes> future = promise.get_future().share();
         bool completed = false, failed = false;
+        uint64_t used = 0;
+        size_t bytes = 0;
     };
     struct Task {
         int64_t index;
@@ -28,6 +40,7 @@ struct MediaProxy::Impl {
     std::vector<std::thread> workers;
     std::vector<std::shared_ptr<httplib::Client>> clients;
     mutable std::mutex mutex;
+    std::mutex demand_mutex;
     std::condition_variable cv;
     std::deque<Task> tasks;
     std::map<int64_t, std::shared_ptr<Entry>> entries;
@@ -39,6 +52,8 @@ struct MediaProxy::Impl {
     int seconds = 2, port = 0;
     double duration = 0;
     std::string origin, prefix, token, playlist;
+    std::string extension = ".ts", init;
+    uint64_t ticks = 0, cached_bytes = 0, cache_limit = 256ULL << 20;
     std::string failure;
     static constexpr int window = 6;
 
@@ -52,20 +67,42 @@ struct MediaProxy::Impl {
         if (index < 0 || index >= count)
             throw Error(404, "Segment does not exist");
         auto existing = entries.find(index);
-        if (existing != entries.end() && !existing->second->failed)
+        if (existing != entries.end() && !existing->second->failed) {
+            existing->second->used = ++ticks;
             return existing->second;
+        }
         auto entry = std::make_shared<Entry>();
+        entry->used = ++ticks;
         entries[index] = entry;
         tasks.push_back({index, generation.load(), entry});
-        while (entries.size() > 16)
-            entries.erase(entries.begin());
         cv.notify_all();
         return entry;
     }
     void prefetch_locked() {
-        auto next = frontier + 1;
-        if (demand >= 0 && next < count && next <= demand + window)
+        for (auto next = frontier + 1; demand >= 0 && next < count && next <= demand + window;
+             ++next) {
+            auto cached = entries.find(next);
+            if (cached != entries.end() && cached->second->completed && !cached->second->failed) {
+                frontier = next;
+                continue;
+            }
             enqueue_locked(next);
+            break;
+        }
+    }
+    void trim_locked() {
+        while (cached_bytes > cache_limit) {
+            auto oldest = entries.end();
+            for (auto it = entries.begin(); it != entries.end(); ++it)
+                if (it->second->completed && !it->second->failed && it->first != demand &&
+                    (oldest == entries.end() || it->second->used < oldest->second->used))
+                    oldest = it;
+            if (oldest == entries.end())
+                break;
+            cached_bytes -= oldest->second->bytes;
+            completed.erase(oldest->first);
+            entries.erase(oldest);
+        }
     }
     void run(const std::shared_ptr<httplib::Client> &client) {
         for (;;) {
@@ -96,7 +133,7 @@ struct MediaProxy::Impl {
                 bytes->clear();
                 status = 0;
                 auto response = client->Get(
-                    prefix + "segments/" + std::to_string(task.index) + ".ts",
+                    prefix + "segments/" + std::to_string(task.index) + extension,
                     [&](const httplib::Response &header) {
                         status = header.status;
                         if (header.status != 200)
@@ -155,13 +192,18 @@ struct MediaProxy::Impl {
                                                   Clock::now() - started)
                                                   .count()}});
                     task.entry->completed = true;
+                    task.entry->bytes = bytes->size();
+                    task.entry->used = ++ticks;
+                    cached_bytes += bytes->size();
                     completed.insert(task.index);
                     task.entry->promise.set_value(bytes);
+                    trim_locked();
                 }
             }
         }
     }
     Bytes fetch(int64_t index) {
+        std::unique_lock demand_lock(demand_mutex);
         std::shared_ptr<Entry> entry;
         bool reset = false;
         {
@@ -173,20 +215,29 @@ struct MediaProxy::Impl {
             auto cached = entries.find(index);
             bool ready =
                 cached != entries.end() && cached->second->completed && !cached->second->failed;
-            if (!ready && demand >= 0 && (index < demand - window || index > demand + window)) {
+            if (demand >= 0 && (index < demand - window || index > demand + window)) {
                 log_event("media.seek", {{"from_segment", demand}, {"to_segment", index}});
                 generation++;
                 resetting = true;
-                for (auto &[n, e] : entries)
-                    fail_locked(e, "Video seek superseded this transfer");
+                std::erase_if(entries, [&](const auto &pair) {
+                    const auto &e = pair.second;
+                    if (!e->completed || e->failed) {
+                        fail_locked(e, "Video seek superseded this transfer");
+                        return true;
+                    }
+                    return false;
+                });
                 tasks.clear();
-                entries.clear();
-                completed.clear();
+                failure.clear();
                 frontier = index - 1;
                 reset = true;
             }
             demand = index;
             entry = enqueue_locked(index);
+            if (ready) {
+                frontier = std::max(frontier, index);
+                log_event("media.cache.hit", {{"index", index}, {"cached_bytes", cached_bytes}});
+            }
             prefetch_locked();
         }
         if (reset) {
@@ -196,6 +247,7 @@ struct MediaProxy::Impl {
             resetting = false;
         }
         cv.notify_all();
+        demand_lock.unlock();
         return entry->future.get();
     }
     ~Impl() {
@@ -217,7 +269,7 @@ struct MediaProxy::Impl {
     }
 };
 MediaProxy::MediaProxy(const std::string &remote, double duration, const Json &config,
-                       std::stop_token stop)
+                       std::stop_token stop, std::shared_ptr<Cache> cache)
     : impl(std::make_unique<Impl>()) {
     log_event("media.timeline.request", {{"origin", log_url(remote)}, {"duration", duration}});
     auto resolved = media_url(remote, config);
@@ -246,6 +298,34 @@ MediaProxy::MediaProxy(const std::string &remote, double duration, const Json &c
     if (!response || response->status != 200 || !response->body.starts_with("#EXTM3U"))
         throw Error(503, "Cannot read remote video timeline");
     impl->playlist = response->body;
+    impl->cache_limit = config.value("media_cache_bytes", uint64_t{256ULL << 20});
+    if (impl->cache_limit < 1 || impl->cache_limit > (2ULL << 30))
+        throw Error(422, "media_cache_bytes must be between 1 and 2147483648");
+    if (impl->playlist.find("#EXT-X-MAP:URI=\"init.mkv\"") != std::string::npos) {
+        impl->extension = ".mkv";
+        probe.set_payload_max_length(64 * 1024 * 1024);
+        auto header = probe.Get(impl->prefix + "init.mkv");
+        if (!header || header->status != 200)
+            throw Error(503, "Cannot read media initialization header");
+        impl->init = std::move(header->body);
+    }
+    if (cache && cache->init == impl->init && !impl->init.empty()) {
+        std::sort(cache->entries.begin(), cache->entries.end(),
+                  [](const auto &a, const auto &b) { return a.used < b.used; });
+        for (const auto &saved : cache->entries) {
+            auto entry = std::make_shared<Impl::Entry>();
+            entry->completed = true;
+            entry->bytes = saved.bytes->size();
+            entry->used = ++impl->ticks;
+            entry->promise.set_value(saved.bytes);
+            impl->entries[saved.index] = entry;
+            impl->completed.insert(saved.index);
+            impl->cached_bytes += entry->bytes;
+        }
+        impl->trim_locked();
+        log_event("media.cache.reused",
+                  {{"segments", impl->entries.size()}, {"bytes", impl->cached_bytes}});
+    }
     std::istringstream lines(impl->playlist);
     std::string line;
     while (std::getline(lines, line))
@@ -260,18 +340,50 @@ MediaProxy::MediaProxy(const std::string &remote, double duration, const Json &c
     impl->server.Get(path + "/index.m3u8", [this](const auto &, auto &res) {
         res.set_content(impl->playlist, "application/vnd.apple.mpegurl");
     });
-    impl->server.Get(path + R"(/segments/([0-9]{1,9})\.ts)", [this](const auto &req, auto &res) {
-        try {
-            auto bytes = impl->fetch(std::stoll(req.matches[1]));
-            res.set_content(*bytes, "video/MP2T");
-        } catch (const Error &e) {
-            res.status = e.status;
-            res.set_content(e.what(), "text/plain");
-        } catch (const std::exception &e) {
-            res.status = 503;
-            res.set_content(e.what(), "text/plain");
+    impl->server.Get(path + "/index.edl", [this, path](const auto &, auto &res) {
+        if (impl->init.empty()) {
+            res.status = 404;
+            return;
         }
+        const auto base = "http://127.0.0.1:" + std::to_string(impl->port) + path;
+        auto quoted = [](const std::string &value) {
+            return "%" + std::to_string(value.size()) + "%" + value;
+        };
+        std::ostringstream edl;
+        // mpv's DASH timeline provides a single demuxer/cache for all tracks.
+        // The init prefix mechanism also works for Matroska clusters, preserving
+        // audio/subtitle codecs that fragmented MP4 cannot carry.
+        edl << "# mpv EDL v0\n!no_chapters\n!mp4_dash,init=" << quoted(base + "/init.mkv") << '\n'
+            << std::fixed << std::setprecision(9);
+        for (int64_t index = 0; index < impl->count; ++index) {
+            const auto begin = index * static_cast<double>(impl->seconds);
+            const auto end = std::min(std::ceil(impl->duration * 60) / 60, begin + impl->seconds);
+            edl << quoted(base + "/segments/" + std::to_string(index) + impl->extension)
+                << ",length=" << end - begin << '\n';
+        }
+        res.set_content(edl.str(), "text/plain");
     });
+    impl->server.Get(path + "/init.mkv", [this](const auto &, auto &res) {
+        if (impl->init.empty()) {
+            res.status = 404;
+            return;
+        }
+        res.set_content(impl->init, "video/x-matroska");
+    });
+    impl->server.Get(path + R"(/segments/([0-9]{1,9})\.)" + impl->extension.substr(1),
+                     [this](const auto &req, auto &res) {
+                         try {
+                             auto bytes = impl->fetch(std::stoll(req.matches[1]));
+                             res.set_content(*bytes, impl->extension == ".mkv" ? "video/x-matroska"
+                                                                               : "video/MP2T");
+                         } catch (const Error &e) {
+                             res.status = e.status;
+                             res.set_content(e.what(), "text/plain");
+                         } catch (const std::exception &e) {
+                             res.status = 503;
+                             res.set_content(e.what(), "text/plain");
+                         }
+                     });
     impl->server.new_task_queue = [] { return new httplib::ThreadPool(8); };
     impl->port = impl->server.bind_to_any_port("127.0.0.1");
     if (impl->port < 0)
@@ -290,7 +402,7 @@ MediaProxy::MediaProxy(const std::string &remote, double duration, const Json &c
 MediaProxy::~MediaProxy() = default;
 std::string MediaProxy::url() const {
     return "http://127.0.0.1:" + std::to_string(impl->port) + "/play/" + impl->token +
-           "/index.m3u8";
+           (impl->init.empty() ? "/index.m3u8" : "/index.edl");
 }
 double MediaProxy::buffered_ahead(double position) const {
     if (!std::isfinite(position) || position < 0)
@@ -306,5 +418,14 @@ double MediaProxy::buffered_ahead(double position) const {
 std::string MediaProxy::failure() const {
     std::lock_guard lock(impl->mutex);
     return impl->failure;
+}
+std::shared_ptr<MediaProxy::Cache> MediaProxy::saved_cache() const {
+    auto saved = std::make_shared<Cache>();
+    std::lock_guard lock(impl->mutex);
+    saved->init = impl->init;
+    for (const auto &[index, entry] : impl->entries)
+        if (entry->completed && !entry->failed)
+            saved->entries.push_back({index, entry->used, entry->future.get()});
+    return saved;
 }
 } // namespace modeld

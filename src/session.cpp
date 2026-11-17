@@ -35,11 +35,13 @@ struct SessionRequest::Impl {
 };
 
 SessionRequest::SessionRequest(const Json &config, const std::string &webpage,
-                               const std::string &source, const Json &headers)
+                               const std::string &source, const Json &headers, const Json &options,
+                               std::shared_ptr<MediaProxy::Cache> cache)
     : impl(std::make_unique<Impl>()) {
     impl->config = config;
     auto *state = impl.get();
-    state->worker = std::jthread([state, webpage, source, headers](std::stop_token stop) {
+    state->worker = std::jthread([state, webpage, source, headers, options,
+                                  cache](std::stop_token stop) {
         try {
             auto urls = resolve_video_sources(webpage, source, stop);
             if (stop.stop_requested())
@@ -53,14 +55,22 @@ SessionRequest::SessionRequest(const Json &config, const std::string &webpage,
             log_event("session.create", {{"source", log_url(urls.front())},
                                          {"backup_count", backups.size()},
                                          {"header_names", names}});
-            state->result.info = request_json(state->config, "POST", "/v1/sessions",
-                                              {{"model", model_id},
-                                               {"task", "frame_interpolation"},
-                                               {"source_url", urls.front()},
-                                               {"source_backups", backups},
-                                               {"source_headers", headers},
-                                               {"target_fps", 60}},
-                                              stop);
+            auto body = options;
+            if (body.contains("audio_source_url")) {
+                const auto audio = resolve_video_sources(webpage, body["audio_source_url"], stop);
+                body["audio_source_url"] = audio.front();
+            }
+            body.update({{"model", model_id},
+                         {"task", "frame_interpolation"},
+                         {"source_url", urls.front()},
+                         {"source_backups", backups},
+                         {"source_headers", headers},
+                         {"target_fps", 60}});
+            state->result.info = request_json(state->config, "POST", "/v1/sessions", body, stop);
+            if (options.value("output_mode", std::string{}) == "main" &&
+                (!state->result.info.contains("media") ||
+                 state->result.info["media"].value("output_mode", std::string{}) != "main"))
+                throw Error(409, "完整主媒体播放需要 modeld 0.1.7 或更新的服务端");
             if (stop.stop_requested())
                 throw Error(499, "Session creation canceled");
             const auto &info = state->result.info;
@@ -71,7 +81,7 @@ SessionRequest::SessionRequest(const Json &config, const std::string &webpage,
             state->stage("media.timeline");
             state->result.media = std::make_unique<MediaProxy>(
                 info.at("playlist_url").get<std::string>(), info.at("duration").get<double>(),
-                state->config, stop);
+                state->config, stop, cache);
         } catch (...) {
             state->error = std::current_exception();
         }

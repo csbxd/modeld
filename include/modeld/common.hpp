@@ -28,6 +28,8 @@ Json request_json(const Json &config, const std::string &method, const std::stri
 std::string netbird_address();
 std::string media_url(const std::string &url, const Json &config = Json::object());
 std::string resolved_video_url(const std::string &opened, const Json &selected_track);
+std::string resolved_track_url(const std::string &opened, const Json &selected_track,
+                               const std::string &type);
 std::vector<std::string> bilibili_video_sources(const std::string &source, const Json &playinfo);
 std::vector<std::string> resolve_video_sources(const std::string &webpage,
                                                const std::string &source,
@@ -48,13 +50,16 @@ struct SourceServer {
 };
 struct MediaProxy {
     struct Impl;
+    struct Cache;
     std::unique_ptr<Impl> impl;
     MediaProxy(const std::string &remote_playlist, double duration,
-               const Json &config = Json::object(), std::stop_token stop = {});
+               const Json &config = Json::object(), std::stop_token stop = {},
+               std::shared_ptr<Cache> cache = {});
     ~MediaProxy();
     std::string url() const;
     double buffered_ahead(double position) const;
     std::string failure() const;
+    std::shared_ptr<Cache> saved_cache() const;
     MediaProxy(const MediaProxy &) = delete;
 };
 struct SessionResult {
@@ -65,7 +70,8 @@ struct SessionRequest {
     struct Impl;
     std::unique_ptr<Impl> impl;
     SessionRequest(const Json &config, const std::string &webpage, const std::string &source,
-                   const Json &headers);
+                   const Json &headers, const Json &options = Json::object(),
+                   std::shared_ptr<MediaProxy::Cache> cache = {});
     ~SessionRequest();
     bool ready() const;
     std::string stage() const;

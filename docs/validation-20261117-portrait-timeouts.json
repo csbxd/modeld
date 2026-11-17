@@ -80,5 +80,41 @@
     "seconds": 10.13987111,
     "width": 1080,
     "height": 1920
+  },
+  "installed": {
+    "client_package": "media-plugins/mpv-modeld-0.1.6::gentoo-cs",
+    "server_package": "app-misc/modeld-0.1.6::gentoo-cs",
+    "test_use_enabled_both": true,
+    "cpp_protocol_tests": "passed on both hosts",
+    "rust_native_tests": {
+      "passed": 5,
+      "failed": 0
+    },
+    "api": {
+      "status": "ready",
+      "version": "0.1.6",
+      "backend": "tensorrt-rtx"
+    },
+    "mpv": {
+      "version": "0.1.6",
+      "display": "null",
+      "source_resolution": [
+        1080,
+        1920
+      ],
+      "source_fps": 30,
+      "activation_seconds": 7.425599086999999,
+      "output": {
+        "codec": "hevc",
+        "fps": 60,
+        "width": 1080,
+        "height": 1920
+      },
+      "playback_advance_seconds": 3.033333,
+      "dropped_frames": 0,
+      "original_track_restored": true,
+      "seek_cache_restored": true,
+      "passed": true
+    }
   }
 }

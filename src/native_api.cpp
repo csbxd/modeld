@@ -43,8 +43,11 @@ struct Context {
     }
 };
 struct Video {
-    std::shared_ptr<std::atomic<bool>> cancelled = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<std::atomic<bool>> cancelled;
     std::unique_ptr<modeld::Video> media;
+};
+struct CancelToken {
+    std::shared_ptr<std::atomic<bool>> value = std::make_shared<std::atomic<bool>>(false);
 };
 } // namespace
 extern "C" {
@@ -63,15 +66,27 @@ void *modeld_context_create(const char *model, const char *cache) {
 void modeld_context_free(void *c) {
     delete static_cast<Context *>(c);
 }
+void *modeld_cancel_token_create(void) {
+    try {
+        return new CancelToken;
+    } catch (...) {
+        error();
+        return nullptr;
+    }
+}
+void modeld_cancel_token_set(void *token) { static_cast<CancelToken *>(token)->value->store(true); }
+void modeld_cancel_token_free(void *token) { delete static_cast<CancelToken *>(token); }
 void *modeld_video_open(void *context, const char *sources_json, const char *source_headers,
-                        int seconds, int qp, const char *encoder, ModeldVideoInfo *info) {
+                        int seconds, int qp, const char *encoder, int source_timeout_seconds,
+                        void *cancel_token, ModeldVideoInfo *info) {
     try {
         auto *c = static_cast<Context *>(context);
         auto v = std::make_unique<Video>();
+        v->cancelled = static_cast<CancelToken *>(cancel_token)->value;
         v->media = std::make_unique<modeld::Video>(
             modeld::Json::parse(sources_json).get<std::vector<std::string>>(),
             source_headers ? source_headers : "", seconds, qp, encoder,
-            [c](int w, int h) { return c->get(w, h); }, v->cancelled);
+            [c](int w, int h) { return c->get(w, h); }, v->cancelled, source_timeout_seconds);
         auto i = v->media->info();
         *info = {i.width, i.height, i.duration, i.source_fps};
         return v.release();

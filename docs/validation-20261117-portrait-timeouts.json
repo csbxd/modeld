@@ -1,0 +1,84 @@
+{
+  "date": "2026-11-17",
+  "gpu": "RTX 4080 SUPER",
+  "version": "0.1.6",
+  "probe": {
+    "backend": "native TensorRT-RTX",
+    "source_timeout_seconds": 3,
+    "dripping_source": {
+      "status": 504,
+      "seconds": 3.070446056,
+      "error": "Source probe exceeded the total time limit of 3 seconds"
+    },
+    "canceled_probe": {
+      "next_status": 201,
+      "next_probe_seconds": 0.1934075240000002
+    },
+    "portrait_probe": {
+      "width": 1080,
+      "height": 1920,
+      "source_fps": 30
+    },
+    "passed": true
+  },
+  "mpv_pending_activation": {
+    "ipc_during_probe_ms": 9.561628999999996,
+    "cancel_ms": 21.067083999999994,
+    "file_change_canceled": true,
+    "passed": true
+  },
+  "portrait_stream": {
+    "backend": "TensorRT-RTX 1.7.1.116",
+    "model": "RIFE 4.26 Heavy FP32",
+    "source_fps": 30,
+    "resolution": [
+      1080,
+      1920
+    ],
+    "includes_cold_profile": true,
+    "segments": [
+      {
+        "index": 0,
+        "frames": 120,
+        "render_seconds": 11.867011,
+        "http_seconds": 13.425329885000002,
+        "bytes": 4848708
+      },
+      {
+        "index": 1,
+        "frames": 120,
+        "render_seconds": 1.359035,
+        "http_seconds": 1.4495188900000011,
+        "bytes": 4944212
+      },
+      {
+        "index": 2,
+        "frames": 120,
+        "render_seconds": 1.343613,
+        "http_seconds": 2.324026107,
+        "bytes": 5002304
+      }
+    ],
+    "output": {
+      "width": 1080,
+      "height": 1920,
+      "color_space": "bt709",
+      "r_frame_rate": "60/1",
+      "nb_read_frames": "360"
+    },
+    "passed": true
+  },
+  "rgb_buffer_fix": {
+    "platform": "x86_64 FFmpeg 9.0.2",
+    "packed_1920x1080_tail_overwrite_bytes": 0,
+    "packed_1080x1920_tail_overwrite_bytes": 24,
+    "fix": "FFmpeg aligned RGB frame followed by a visible-row copy to packed input"
+  },
+  "scope": "Synthetic native portrait input; cold profile included; no guarantee for arbitrary sources or network conditions.",
+  "stalled_primary_backup": {
+    "status": 201,
+    "seconds": 10.13987111,
+    "width": 1080,
+    "height": 1920
+  }
+}

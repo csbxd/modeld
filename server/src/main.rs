@@ -7,7 +7,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use native::{Backend, Segment, Video};
+use native::{Backend, Cancellation, Segment, Video};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
@@ -69,6 +69,7 @@ struct Config {
     segment_seconds: i32,
     cache_segments: usize,
     session_ttl_seconds: u64,
+    source_timeout_seconds: i32,
     encoder_qp: i32,
     encoder: String,
 }
@@ -86,6 +87,7 @@ impl Default for Config {
             segment_seconds: 2,
             cache_segments: 12,
             session_ttl_seconds: 120,
+            source_timeout_seconds: 30,
             encoder_qp: 18,
             encoder: "hevc_nvenc".into(),
         }
@@ -98,6 +100,7 @@ impl Config {
             || !(1..=10).contains(&self.segment_seconds)
             || !(1..=256).contains(&self.cache_segments)
             || self.session_ttl_seconds < 30
+            || !(1..=120).contains(&self.source_timeout_seconds)
             || !(0..=40).contains(&self.encoder_qp)
             || !matches!(self.encoder.as_str(), "h264_nvenc" | "hevc_nvenc")
         {
@@ -241,7 +244,7 @@ impl App {
 }
 
 fn catalog() -> Value {
-    json!({"object":"list","data":[{"id":MODEL,"task":"frame_interpolation","version":"4.26","variant":"heavy","precision":"fp32","tf32":false,"backend":"tensorrt-rtx","state":"ready","max_width":1920,"max_height":1080,"target_fps":60}]})
+    json!({"object":"list","data":[{"id":MODEL,"task":"frame_interpolation","version":"4.26","variant":"heavy","precision":"fp32","tf32":false,"backend":"tensorrt-rtx","state":"ready","max_width":1920,"max_height":1920,"max_long_side":1920,"max_short_side":1080,"max_pixels":2073600,"target_fps":60}]})
 }
 fn playlist(duration: f64, seconds: i32) -> Result<String> {
     if !duration.is_finite()
@@ -353,6 +356,15 @@ impl CreateSession {
         Ok(())
     }
 }
+struct ProbeGuard(Option<Arc<Cancellation>>);
+impl Drop for ProbeGuard {
+    fn drop(&mut self) {
+        if let Some(control) = &self.0 {
+            control.cancel();
+            eprintln!("[modeld] Source probe canceled before completion");
+        }
+    }
+}
 async fn create(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
@@ -370,16 +382,65 @@ async fn create(
     let seconds = app.config.segment_seconds;
     let qp = app.config.encoder_qp;
     let encoder = app.config.encoder.clone();
+    let source_timeout = app.config.source_timeout_seconds;
+    let cancellation = Cancellation::new()?;
+    let mut probe_guard = ProbeGuard(Some(cancellation.clone()));
     let source_headers = body.http_headers()?;
     let mut sources = vec![body.source_url];
     sources.extend(body.source_backups);
     let sources =
         serde_json::to_string(&sources).map_err(|_| ApiError::new(422, "Invalid source URLs"))?;
-    let video = tokio::task::spawn_blocking(move || {
-        Video::open(backend, &sources, &source_headers, seconds, qp, &encoder)
-    })
-    .await
-    .map_err(|_| ApiError::new(500, "Source probe task failed"))??;
+    let started = Instant::now();
+    eprintln!("[modeld] Source probe started; total limit {source_timeout}s");
+    let probe = tokio::task::spawn_blocking(move || {
+        // Keep the slot occupied until native probing actually exits, including
+        // after an HTTP disconnect or timeout; detached tasks cannot bypass the limit.
+        Video::open(
+            backend,
+            &sources,
+            &source_headers,
+            seconds,
+            qp,
+            &encoder,
+            &native::SourceControl {
+                timeout_seconds: source_timeout,
+                cancellation,
+            },
+        )
+        .map(|video| (video, permit))
+    });
+    let result =
+        match tokio::time::timeout(Duration::from_secs(source_timeout as u64 + 5), probe).await {
+            Ok(Ok(result)) => {
+                probe_guard.0 = None;
+                result
+            }
+            Ok(Err(_)) => {
+                probe_guard.0 = None;
+                Err(ApiError::new(500, "Source probe task failed"))
+            }
+            Err(_) => Err(ApiError::new(
+                504,
+                format!(
+            "Source probe exceeded {source_timeout}s; check the source server or try a local file"
+        ),
+            )),
+        };
+    let (video, permit) = result.inspect_err(|error| {
+        eprintln!(
+            "[modeld] Source probe failed after {:.3}s: HTTP {}: {}",
+            started.elapsed().as_secs_f64(),
+            error.status,
+            error
+        );
+    })?;
+    eprintln!(
+        "[modeld] Source probe ready after {:.3}s: {}x{} at {:.6} fps",
+        started.elapsed().as_secs_f64(),
+        video.info.width,
+        video.info.height,
+        video.info.source_fps
+    );
     let id = random_id()?;
     let info = video.info;
     let (paused, _) = watch::channel(false);
@@ -392,6 +453,7 @@ async fn create(
         _permit: permit,
     });
     app.sessions.lock().unwrap().insert(id.clone(), session);
+    probe_guard.0 = None;
     Ok((
         StatusCode::CREATED,
         Json(

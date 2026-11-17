@@ -78,12 +78,17 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
     std::string id, original_vid, enabled_entry, original_cache_seek;
     std::unique_ptr<SourceServer> source;
     std::unique_ptr<MediaProxy> media;
+    std::unique_ptr<SessionRequest> pending;
     bool buffering = false, activating = false;
     int activation_pause = 0;
     double media_duration = 0;
     std::string stage = "startup";
     Json config;
     auto clear = [&] {
+        if (pending) {
+            log_event("session.create.cancel");
+            pending.reset();
+        }
         if (!id.empty())
             log_event("session.close");
         if (!id.empty()) {
@@ -178,7 +183,7 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                     stage = "toggle";
                     log_event("toggle",
                               {{"active", !id.empty()}, {"tracks", log_tracks(tracks(m))}});
-                    if (!id.empty()) {
+                    if (!id.empty() || pending) {
                         restore();
                         osd(m, "RIFE 已关闭，使用原视频轨");
                         continue;
@@ -194,13 +199,18 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                             selected = track;
                     if (selected.is_null())
                         throw Error(422, "当前文件没有可插帧的视频轨");
+                    const auto width = selected.value("demux-w", 0);
+                    const auto height = selected.value("demux-h", 0);
+                    if (width > 0 && height > 0 && !supported_dimensions(width, height))
+                        throw Error(422, "支持偶数尺寸，最长边 1920、最短边 1080；当前 " +
+                                             std::to_string(width) + "×" + std::to_string(height));
                     original_vid = property(m, "vid");
                     enabled_entry = entry;
                     mpv_get_property(m, "pause", MPV_FORMAT_FLAG, &activation_pause);
                     activating = true;
                     int pause = 1;
                     mpv_set_property(m, "pause", MPV_FORMAT_FLAG, &pause);
-                    osd(m, "正在连接 RIFE 插帧服务…");
+                    osd(m, "正在准备 RIFE 插帧…再次按 Ctrl+Shift+i 可取消", 60000);
                     std::string url;
                     Json headers = Json::object();
                     auto opened = property(m, "stream-open-filename");
@@ -241,35 +251,18 @@ extern "C" __attribute__((visibility("default"))) int mpv_open_cplugin(mpv_handl
                         url = source->url();
                     }
                     stage = "session.create";
-                    auto urls = resolve_video_sources(path, url);
-                    url = urls.front();
-                    Json backups = Json::array();
-                    for (size_t n = 1; n < urls.size(); ++n)
-                        backups.push_back(urls[n]);
-                    Json header_names = Json::array();
-                    for (const auto &[name, value] : headers.items())
-                        header_names.push_back(name);
-                    log_event("session.create", {{"source", log_url(url)},
-                                                 {"backup_count", backups.size()},
-                                                 {"header_names", header_names}});
-                    auto result = request_json(config, "POST", "/v1/sessions",
-                                               {{"model", model_id},
-                                                {"task", "frame_interpolation"},
-                                                {"source_url", url},
-                                                {"source_backups", backups},
-                                                {"source_headers", headers},
-                                                {"target_fps", 60}});
-                    id = result.at("id").get<std::string>();
-                    if (playing_entry(m) != entry)
+                    pending = std::make_unique<SessionRequest>(config, path, url, headers);
+                }
+                if (pending && pending->ready()) {
+                    stage = pending->stage();
+                    auto result = pending->take();
+                    id = result.info.at("id").get<std::string>();
+                    pending.reset();
+                    if (playing_entry(m) != enabled_entry)
                         throw Error(409, "播放文件已变化，请重新开启插帧");
-                    media_duration = result.at("duration").get<double>();
-                    log_event("session.created", {{"width", result.at("width")},
-                                                  {"height", result.at("height")},
-                                                  {"source_fps", result.at("source_fps")},
-                                                  {"duration", media_duration}});
+                    media_duration = result.info.at("duration").get<double>();
                     stage = "media.timeline";
-                    media = std::make_unique<MediaProxy>(
-                        result.at("playlist_url").get<std::string>(), media_duration);
+                    media = std::move(result.media);
                     // Cached seeks can bypass the proxy after its generation
                     // changed, leaving the buffer guard waiting for segments
                     // mpv will never request. Keep forward buffering, but make

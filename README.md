@@ -23,6 +23,14 @@ flowchart LR
 
 本地文件只通过不可猜测的临时 URL 共享给服务端，接口绑定 NetBird 地址，不提供目录浏览。关闭插帧或离开文件会取消会话；异常退出由服务端 TTL 回收。
 
+0.1.6 支持原生 **1080×1920 竖屏**，与横屏共用最长边 1920、最短边 1080 的限制。尺寸校验、模型能力接口和推理引擎使用相同规则，不旋转或缩小输入。RGB 转换使用 FFmpeg 的对齐帧缓冲，再复制有效像素到 RIFE，避免宽度为 1080 时 SIMD 转换越过紧凑缓冲区边界。未知色彩空间的高清竖屏也按高清尺寸判断。
+
+会话创建在后台执行，等待期间可再次按快捷键取消，也可直接切换视频；原视频的暂停状态会恢复。取消会关闭正在等待的连接，并清理已经创建但尚未接入的远端会话。服务端在请求取消时中断片源探测，探测线程真正退出前仍占用会话名额，避免重复请求堆积后台任务。
+
+服务端 `source_timeout_seconds` 默认 30 秒，限制一次探测和一次分段生成的总耗时；探测单个地址最多使用 10 秒，为备用地址保留机会。即使远端持续少量传输或不断重连，也不能无限延长总时限。服务端超时返回 HTTP 504，日志记录阶段、耗时和状态；客户端区分源探测超时、连接中断与无法连接 API。客户端创建请求默认等待 45 秒，可用 `session_timeout_seconds` 调整；提高服务端上限时需相应调整客户端。
+
+已在 RTX 4080 SUPER 上验证原生 1080×1920、30→60 fps：6 秒视频输出完整 360 帧 HEVC。慢速持续传输在设置的 3 秒总时限内返回 504；取消探测后约 0.19 秒可创建下一会话。实际 mpv 等待期间命令响应约 10 毫秒、取消约 21 毫秒，切换文件同样会取消等待。[验证数据](docs/validation-20261117-portrait-timeouts.json) 包含首次竖屏模型准备，不代表所有片源和网络条件。
+
 B 站等网站视频使用 mpv 已解析的实际媒体地址。插件从 `stream-open-filename` 的 DASH/EDL 时间轴中选取当前视频节目，并传递播放器使用的 Referer、User-Agent 等 HTTP 请求头，音轨与弹幕字幕继续由原播放器管理。不会把网页地址当作视频，也不会再次调用解析器。需要同时更新客户端与服务端到 0.1.2 或更新版本。
 
 AV1 媒体源使用 FFmpeg 的 `libdav1d` 软件解码器，0.1.3 服务端 ebuild 强制启用 `ffmpeg[dav1d]`。仅有 FFmpeg 的原生 `av1` 或 `av1_cuvid` 解码器不足以供当前软件帧处理路径使用。H.264、HEVC 继续使用对应的软件解码器；无需改选其他源画质。
@@ -64,12 +72,15 @@ emerge --ask media-plugins/mpv-modeld::gentoo-cs
 ```json
 {
   "api": "http://s8030.netbird.cloud:8765",
+  "api_address": "",
   "token_file": "/home/YOUR_USER/.config/modeld/api.token",
   "callback_address": "auto"
 }
 ```
 
 保存为 `~/.config/modeld/client.json`，token 文件权限设为 0600。把安装的 `/usr/lib64/mpv/scripts/modeld.so` 链接到 `~/.config/mpv/scripts/modeld.so`，重新打开 mpv。
+
+若 NetBird 域名解析不稳定，可把 `api_address` 设置为该服务端已确认的 NetBird IP，例如 `100.123.9.240`。它仅指定此 API 主机的连接地址，同时适用于返回的 HLS 地址；HTTP Host、HTTPS 的 SNI 和证书主机校验继续使用 `api` 中的域名，不修改系统 DNS。留空则使用正常解析。
 
 `modelctl health` 与 `modelctl models` 可检查连接。`modelctl source FILE` 为 API 调试临时共享指定文件，结束命令即停止共享。插件会通过系统 NSS 解析 NetBird HTTP 媒体地址，兼容使用 c-ares 的 mpv/libcurl 与系统 split DNS 的差异。
 
@@ -124,7 +135,7 @@ HLS 解复用和 HEVC 解码还需要后续分段才能释放已有帧，因此�
 
 ## 画质与范围
 
-支持原生偶数尺寸、最大 1920×1080、低于 60 fps 的可定位 SDR 视频，输出时间轴固定为 60 fps。网站视频需由 mpv 成功解析为单段 HTTP 媒体或 DASH 分离音视频中的完整视频文件；多片段拼接、HDR、直播、DRM 和 4K 推理不在本期范围。服务端不解析网页。文件打开、解码或服务故障会保留或恢复原视频轨。
+支持原生偶数尺寸、最长边不超过 1920 且最短边不超过 1080（横屏 1920×1080 或竖屏 1080×1920）、低于 60 fps 的可定位 SDR 视频，输出时间轴固定为 60 fps。网站视频需由 mpv 成功解析为单段 HTTP 媒体或 DASH 分离音视频中的完整视频文件；多片段拼接、HDR、直播、DRM 和 4K 推理不在本期范围。服务端不解析网页。文件打开、解码或服务故障会保留或恢复原视频轨。
 
 推理为 FP32；传输使用 **8 位 HEVC NVENC、QP 18**，属于有损编码。可在服务端配置 `encoder` 为 `h264_nvenc`，或调整 `encoder_qp`。网络码率、编码和客户端解码都会影响实际播放，60 fps 视频格式不等于已验证的端到端实时吞吐。
 
@@ -158,3 +169,5 @@ MODELD_NATIVE_LIB_DIR="$PWD/build-server" cargo build --locked --release
 默认 CUDA 架构面向 RTX 4080 SUPER 的 SM 89。其他 GPU 需使用对应的 CUDA 架构重新构建。API 单元测试不使用伪造推理作为生产回退；实际推理、编码、网络与 mpv 播放需要在目标机器上单独验证。
 
 服务端启用 `BUILD_TESTING` 后还构建手工故障测试源 `modeld-fault-source VIDEO PORT`，仅监听 127.0.0.1。以 `/primary` 和 `/backup` 创建会话，随后 `POST /fail` 会切断主连接并使后续主源请求返回 503。通过实际模型请求分段并检查 `/stats`、服务日志及输出帧数，可以验证断线、备用源切换和完整分段重建；此工具不安装到系统。
+
+该测试源的 `/drip` 每 100 毫秒发送一个字节，用于验证总时限不会被持续少量数据重置。启动 `max_sessions=1`、`source_timeout_seconds=3` 的独立原生测试 API 后，可运行 `node tests/probe-deadlines.mjs API TOKEN_FILE SOURCE_FIXTURE REPORT.json` 验证 504、HTTP 取消和名额释放。`modeld-source-probe URL TIMEOUT_SECONDS [CANCEL_AFTER_MS]` 可单独检查原生取源、解码与 RGB 转换，不初始化推理引擎。这些工具只用于开发测试，Node.js 不属于服务或播放器的运行依赖。

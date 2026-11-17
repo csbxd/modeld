@@ -1,9 +1,11 @@
 #pragma once
+#include "modeld/limits.hpp"
 #include <chrono>
 #include <filesystem>
 #include <httplib.h>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <stop_token>
 #include <string>
 #include <vector>
 namespace modeld {
@@ -20,14 +22,16 @@ std::string random_id();
 std::string sha256_file(const std::filesystem::path &path);
 bool secure_equal(const std::string &a, const std::string &b);
 Json client_config();
+void configure_api_client(httplib::Client &client, const Json &config);
 Json request_json(const Json &config, const std::string &method, const std::string &path,
-                  const Json &body = Json::object());
+                  const Json &body = Json::object(), std::stop_token stop = {});
 std::string netbird_address();
-std::string media_url(const std::string &url);
+std::string media_url(const std::string &url, const Json &config = Json::object());
 std::string resolved_video_url(const std::string &opened, const Json &selected_track);
 std::vector<std::string> bilibili_video_sources(const std::string &source, const Json &playinfo);
 std::vector<std::string> resolve_video_sources(const std::string &webpage,
-                                               const std::string &source);
+                                               const std::string &source,
+                                               std::stop_token stop = {});
 std::filesystem::path client_log_path();
 void log_event(const std::string &event, const Json &details = Json::object()) noexcept;
 std::string log_url(const std::string &url);
@@ -45,11 +49,27 @@ struct SourceServer {
 struct MediaProxy {
     struct Impl;
     std::unique_ptr<Impl> impl;
-    MediaProxy(const std::string &remote_playlist, double duration);
+    MediaProxy(const std::string &remote_playlist, double duration,
+               const Json &config = Json::object(), std::stop_token stop = {});
     ~MediaProxy();
     std::string url() const;
     double buffered_ahead(double position) const;
     std::string failure() const;
     MediaProxy(const MediaProxy &) = delete;
+};
+struct SessionResult {
+    Json info;
+    std::unique_ptr<MediaProxy> media;
+};
+struct SessionRequest {
+    struct Impl;
+    std::unique_ptr<Impl> impl;
+    SessionRequest(const Json &config, const std::string &webpage, const std::string &source,
+                   const Json &headers);
+    ~SessionRequest();
+    bool ready() const;
+    std::string stage() const;
+    SessionResult take();
+    SessionRequest(const SessionRequest &) = delete;
 };
 } // namespace modeld

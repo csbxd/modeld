@@ -21,7 +21,7 @@ class Video {
   public:
     Video(const std::vector<std::string> &sources, const std::string &source_headers,
           int segment_seconds, int qp, const std::string &encoder, RifeFactory factory,
-          std::shared_ptr<std::atomic<bool>> cancelled);
+          std::shared_ptr<std::atomic<bool>> cancelled, int source_timeout_seconds);
     ~Video();
     MediaInfo info() const;
     Segment render(int64_t sequence);

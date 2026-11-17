@@ -11,13 +11,22 @@
 #include <openssl/rand.h>
 #include <sstream>
 namespace modeld {
-std::string media_url(const std::string &url) {
+std::string media_url(const std::string &url, const Json &config) {
     if (!url.starts_with("http://"))
         return url;
     auto slash = url.find('/', 7);
     auto authority = url.substr(7, slash == std::string::npos ? slash : slash - 7);
     auto colon = authority.find(':');
     auto host = authority.substr(0, colon);
+    const auto pinned = config.value("api_address", std::string{});
+    if (!pinned.empty() && config.contains("api") &&
+        httplib::Client(config.at("api").get<std::string>()).host() == host) {
+        httplib::Client client(config.at("api").get<std::string>());
+        configure_api_client(client, config); // validate the numeric address
+        const auto address = pinned.find(':') == std::string::npos ? pinned : "[" + pinned + "]";
+        return "http://" + address + authority.substr(host.size()) +
+               (slash == std::string::npos ? "" : url.substr(slash));
+    }
     if (!host.ends_with(".netbird.cloud"))
         return url;
     // mpv's libcurl can use c-ares, which bypasses systemd-resolved's split DNS.
@@ -98,8 +107,22 @@ Json client_config() {
         j.merge_patch(read_json(user));
     return j;
 }
+void configure_api_client(httplib::Client &client, const Json &config) {
+    const auto address = config.value("api_address", std::string{});
+    if (address.empty())
+        return;
+    in6_addr bytes{};
+    if (inet_pton(AF_INET, address.c_str(), &bytes) != 1 &&
+        inet_pton(AF_INET6, address.c_str(), &bytes) != 1)
+        throw Error(422, "api_address must be a numeric IPv4 or IPv6 address");
+    httplib::Client endpoint(config.at("api").get<std::string>());
+    if (endpoint.host() == client.host())
+        // This changes only the connection address; Host, SNI and TLS name checks
+        // still use the configured hostname. No system DNS files are modified.
+        client.set_hostname_addr_map({{client.host(), address}});
+}
 Json request_json(const Json &c, const std::string &method, const std::string &path,
-                  const Json &body) {
+                  const Json &body, std::stop_token stop) {
     const auto started = Clock::now();
     const bool heartbeat = path.ends_with("/heartbeat");
     const auto route = path == "/v1/sessions"              ? "session.create"
@@ -109,10 +132,23 @@ Json request_json(const Json &c, const std::string &method, const std::string &p
     if (!heartbeat)
         log_event("api.request", {{"method", method}, {"route", route}});
     httplib::Client client(c.at("api").get<std::string>());
-    client.set_connection_timeout(method == "DELETE" ? 3 : 10);
-    client.set_read_timeout(method == "DELETE" ? 3 : (path.ends_with("/heartbeat") ? 5 : 180));
-    httplib::Headers headers = {
-        {"Authorization", "Bearer " + read_token(c.at("token_file").get<std::string>())}};
+    configure_api_client(client, c);
+    const auto wait = path == "/v1/sessions" ? c.value("session_timeout_seconds", 45)
+                      : method == "DELETE"   ? 3
+                                             : 5;
+    if (wait < 1 || wait > 180)
+        throw Error(422, "session_timeout_seconds must be between 1 and 180");
+    client.set_connection_timeout(method == "DELETE" ? 3 : 5);
+    client.set_read_timeout(wait);
+    client.set_max_timeout((wait + 5) * 1000);
+    client.set_payload_max_length(2 * 1024 * 1024);
+    std::stop_callback cancel_request(stop, [&] { client.stop(); });
+    if (stop.stop_requested())
+        throw Error(499, "Session creation canceled");
+    httplib::Headers headers;
+    if (path != "/health")
+        headers.emplace("Authorization",
+                        "Bearer " + read_token(c.at("token_file").get<std::string>()));
     auto result = method == "POST"     ? client.Post(path, headers, body.dump(), "application/json")
                   : method == "DELETE" ? client.Delete(path, headers)
                                        : client.Get(path, headers);
@@ -122,7 +158,18 @@ Json request_json(const Json &c, const std::string &method, const std::string &p
         log_event("api.failed", {{"route", route},
                                  {"elapsed_ms", elapsed},
                                  {"error", httplib::to_string(result.error())}});
-        throw Error(503, "Model API connection failed: " + httplib::to_string(result.error()));
+        if (stop.stop_requested())
+            throw Error(499, "Session creation canceled");
+        if (result.error() == httplib::Error::Timeout ||
+            (result.error() == httplib::Error::Read && elapsed >= wait * 1000))
+            throw Error(504, "Model API response timed out after " + std::to_string(wait) +
+                                 " seconds; source probing may be stalled");
+        if (result.error() == httplib::Error::Read ||
+            result.error() == httplib::Error::ConnectionClosed)
+            throw Error(503, "Model API connection closed before a response was received");
+        throw Error(503, "Cannot connect to model API " + log_url(c.at("api")) +
+                             "; check NetBird routing/DNS and the modeld service (" +
+                             httplib::to_string(result.error()) + ")");
     }
     if (!heartbeat || result->status >= 400)
         log_event("api.response", {{"route", route},
@@ -173,7 +220,10 @@ Json model_catalog(bool ready) {
                                    {"backend", "tensorrt-rtx"},
                                    {"state", ready ? "ready" : "loading"},
                                    {"max_width", 1920},
-                                   {"max_height", 1080},
+                                   {"max_height", 1920},
+                                   {"max_long_side", 1920},
+                                   {"max_short_side", 1080},
+                                   {"max_pixels", 2073600},
                                    {"target_fps", 60}}})}};
 }
 std::string playlist(double duration, int fps, int seconds) {

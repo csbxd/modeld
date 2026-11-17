@@ -37,14 +37,9 @@ int main(int argc, char **argv) {
         if (cmd == "models")
             std::cout << request_json(c, "GET", "/v1/models").dump(2) << '\n';
         else if (cmd == "health") {
-            httplib::Client client(c.at("api").get<std::string>());
-            auto r = client.Get("/health");
-            if (!r)
-                throw Error(503, "API unavailable");
-            std::cout << r->body << '\n';
-            return r->status == 200 ? 0 : 1;
+            std::cout << request_json(c, "GET", "/health").dump(2) << '\n';
         } else if (cmd == "media-url" && argc == 3)
-            std::cout << media_url(argv[2]) << '\n';
+            std::cout << media_url(argv[2], c) << '\n';
         else if (cmd == "session" && argc == 3)
             std::cout << request_json(c, "POST", "/v1/sessions", Json::parse(argv[2])).dump()
                       << '\n';

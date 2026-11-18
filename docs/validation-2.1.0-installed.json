@@ -1,0 +1,211 @@
+{
+  "date": "2026-11-18",
+  "version": "2.1.0",
+  "release_commit": "4c8f9db400fa34adcb17b24ba85ce8e9e0678404",
+  "source_sha256": "fb588627194f25fc6daf9cd7c95ed09e8e9d88857c29afdc87efa11da2bedff3",
+  "crx_sha256": "10f0070c5918e026934cd24dcedf2fd9b37d57976374c8a83fb745799f35d624",
+  "packages": {
+    "browser": "www-plugins/modeld-browser-2.1.0::gentoo-cs",
+    "server": "app-misc/modeld-2.1.0::gentoo-cs",
+    "mpv": "media-plugins/mpv-modeld-2.1.0::gentoo-cs"
+  },
+  "normal_chrome": {
+    "id": "iegbohgbehnfnnnkmgaolhhffinebpdk",
+    "installed": true,
+    "enabled": true,
+    "install_location": "policy download",
+    "version": "2.1.0",
+    "can_disable": true,
+    "native_processes": [
+      {
+        "pid": 30331,
+        "parent": 4329,
+        "installed_binary": true,
+        "test_config_override": false
+      },
+      {
+        "pid": 30946,
+        "parent": 8992,
+        "installed_binary": true,
+        "test_config_override": false
+      }
+    ]
+  },
+  "production_service": {
+    "ready": true,
+    "version": "2.1.0",
+    "browser_profile": true,
+    "existing_credentials_inherited": true
+  },
+  "installed_sources_match_tested_sources": true,
+  "playback": {
+    "test": "real Bilibili extension playback",
+    "original": {
+      "ui": {
+        "state": "off",
+        "label": "未开启"
+      },
+      "video": {
+        "time": 0,
+        "duration": 16192,
+        "paused": true,
+        "width": 640,
+        "height": 360,
+        "ready": 1,
+        "quality": {
+          "totalVideoFrames": 0,
+          "droppedVideoFrames": 0
+        },
+        "buffer": []
+      },
+      "player": {
+        "time": 0,
+        "duration": 16192,
+        "paused": true
+      }
+    },
+    "started": {
+      "ui": {
+        "state": "on",
+        "label": "60 fps"
+      },
+      "video": {
+        "time": 0.700311,
+        "duration": 16191.366688,
+        "paused": false,
+        "width": 640,
+        "height": 360,
+        "ready": 4,
+        "quality": {
+          "totalVideoFrames": 7,
+          "droppedVideoFrames": 1
+        },
+        "buffer": [
+          [
+            0,
+            3.999999
+          ]
+        ]
+      },
+      "player": {
+        "time": 0.700311,
+        "duration": 16191.366688,
+        "paused": false
+      }
+    },
+    "playing": {
+      "ui": {
+        "state": "on",
+        "label": "60 fps"
+      },
+      "video": {
+        "time": 8.695025,
+        "duration": 16191.366688,
+        "paused": false,
+        "width": 640,
+        "height": 360,
+        "ready": 4,
+        "quality": {
+          "totalVideoFrames": 487,
+          "droppedVideoFrames": 1
+        },
+        "buffer": [
+          [
+            0,
+            19.999999
+          ]
+        ]
+      },
+      "player": {
+        "time": 8.695025,
+        "duration": 16191.366688,
+        "paused": false
+      }
+    },
+    "advance": 7.994713999999999,
+    "decoded_frames": 480,
+    "seek": {
+      "ui": {
+        "state": "on",
+        "label": "60 fps"
+      },
+      "video": {
+        "time": 120,
+        "duration": 16191.366688,
+        "paused": true,
+        "width": 640,
+        "height": 360,
+        "ready": 4,
+        "quality": {
+          "totalVideoFrames": 491,
+          "droppedVideoFrames": 1
+        },
+        "buffer": [
+          [
+            0,
+            19.999999
+          ],
+          [
+            120,
+            121.999999
+          ]
+        ]
+      },
+      "player": {
+        "time": 120,
+        "duration": 16191.366688,
+        "paused": true
+      }
+    },
+    "restored": {
+      "ui": {
+        "state": "off",
+        "label": "未开启"
+      },
+      "video": {
+        "time": 122.140639,
+        "duration": 16192,
+        "paused": false,
+        "width": 853,
+        "height": 480,
+        "ready": 4,
+        "quality": {
+          "totalVideoFrames": 69,
+          "droppedVideoFrames": 0
+        },
+        "buffer": [
+          [
+            120.372471,
+            139.999999
+          ]
+        ]
+      },
+      "player": {
+        "time": 122.140639,
+        "duration": 16192,
+        "paused": false
+      }
+    },
+    "passed": true,
+    "errors": []
+  },
+  "completion_audit": [
+    {
+      "requirement": "Browser extension",
+      "evidence": "Signed CRX installed and enabled in normal Chrome through the packaged Linux policy."
+    },
+    {
+      "requirement": "Configurable",
+      "evidence": "Actual options UI saved endpoint and buffering/cache preferences; storage and native private config were inspected."
+    },
+    {
+      "requirement": "Bilibili interpolation",
+      "evidence": "Actual Chrome/Bilibili decoded approximately 60 fps; original controls pause/seek/play and restoration passed with no JS errors."
+    },
+    {
+      "requirement": "Unattended operation",
+      "evidence": "Native component and GPU service were installed through Portage, normal Chrome connected to the installed native host, and existing credentials were inherited without user input."
+    }
+  ],
+  "passed": true
+}

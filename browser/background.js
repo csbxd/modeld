@@ -86,8 +86,10 @@ async function route(message,sender){
     }
     if(tabs.get(tabId)!==state){await native('close',{session:created.id});throw Error('已取消插帧');}
     state.created=created;state.preferences=pref;
-    state.lease=setInterval(()=>native('lease',{session:created.id,paused:state.paused}).catch(error=>{state.error=error.message;}),10000);
-    await native('lease',{session:created.id,paused:true});
+    const renew=()=>native('lease',{session:created.id,paused:state.paused})
+      .then(()=>{state.error=null;},error=>{state.error=error.message;});
+    state.lease=setInterval(renew,10000);
+    await renew();
     chrome.action.setBadgeText({tabId,text:'60'});chrome.action.setBadgeBackgroundColor({tabId,color:'#1b8f71'});
     return {created,preferences:pref,source:{width:source.width,height:source.height,bvid:source.bvid,cid:source.cid}};
   }

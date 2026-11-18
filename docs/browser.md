@@ -10,6 +10,8 @@ Chrome Manifest V3 扩展，在 B 站原播放器里使用远端 RIFE 4.26 Heavy
 
 支持当前 modeld 的 SDR、原生 1080p 范围、低于 60 fps 的输入。浏览器输出为 H.264 High 4.2、60 fps 与原 AAC-LC 音轨，视频只编码一次，音轨不重新编码。网页字幕与弹幕仍由 B 站绘制。QP 越低，编码画质与带宽通常越高。
 
+开启前检查实际选中的音轨。当前浏览器传输支持标准 AAC-LC；选中 Dolby 或 Hi-Res 音轨时，页面会提示切换音质，由用户选择后再开启插帧。
+
 ## Gentoo 安装
 
 ```sh
@@ -29,8 +31,10 @@ emerge --ask www-plugins/modeld-browser::gentoo-cs
 - `POST /api/v2/browser/sessions` 使用浏览器专用 H.264/fMP4 配置，不更改 mpv 默认的 HEVC/Matroska 输出。
 - fMP4 初始化头共享，片段保留绝对音视频解码时间，独立片段可用于远距离定位。
 - 播放时暂停并卸下原 DASH source，以 MediaSource 接管相同 video。播放器内核通过 adapter 读取新的时钟和缓冲；关闭时重接原 DASH source 并恢复当前位置。原播放器可继续自行选择合适的源画质。
+- 关闭时并行恢复原播放并回收远端会话，关闭操作完成后可再次开启插帧。
 - 分段按需读取，MSE 保留配置的后向范围，后台字节缓存按 LRU 回收。页面离开或会话关闭会取消远端工作。
 - 末段追加完成后调用 MediaSource.endOfStream，让浏览器正常触发片尾事件。片尾后定位到未缓冲的位置仍可追加分段并继续播放。
+- 普通窗口控件由 document.body 下的独立节点承载，播放器底部预留控件空间；定位随滚动和尺寸变化更新。页面框架继续管理播放器周围的节点。全屏下将控件放入播放器原生控制条。
 
 ## 开发验证
 
@@ -45,5 +49,7 @@ node --test tests/browser*.test.mjs
 Chrome 开发测试使用独立 profile、开发者模式和 unpacked 扩展。`tools/browser/verify.mjs` 通过实际 Chrome 检查 B 站播放、解码帧数、原控制条暂停/定位及恢复。正式安装使用已签名 CRX，不要求用户开启开发者模式。
 
 对已打开的测试视频运行 `node tools/browser/verify-end.mjs CHROME_PROFILE REPORT_DIRECTORY BVID`，可验证片尾结束、结束后向未缓冲位置定位、普通窗口控件布局和全屏切换。对应回归记录在 `docs/validation-2.1.1-browser.json`。
+
+在独立测试 profile 中运行 `node tools/browser/verify-page.mjs CHROME_PROFILE REPORT_DIRECTORY BVID`，会新建测试页，检查页面初始化、开启插帧后延迟加载评论、两次开关后的节点身份和顺序、播放器外 DOM 变更、音量和倍速保留，以及网页全屏切换。测试 GPU 会话使用该 profile 注册的 native host 配置。对应记录在 `docs/validation-2.1.2-browser.json`。
 
 签名私钥保存在维护者的私有目录，不随源码或 ebuild 分发。扩展公钥在 manifest 中固定，便于本机程序限制允许的扩展来源。

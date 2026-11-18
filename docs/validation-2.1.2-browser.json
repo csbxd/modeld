@@ -1,0 +1,458 @@
+{
+  "version": "2.1.2",
+  "date": "2026-11-18",
+  "browser": "Google Chrome 156.0.8078.47 arm64",
+  "method": "Independent Chrome profile, actual Bilibili page, native host 2.1.2 and private modeld 2.1.0 API on s8030 over NetBird",
+  "initialization": {
+    "original": [
+      {
+        "extensionEnabled": false,
+        "errors": [],
+        "consoleErrors": [],
+        "commentHostChildren": 1,
+        "commentRequests": [
+          {
+            "path": "/x/v2/reply/subject/description",
+            "status": 200,
+            "result": {
+              "code": 0,
+              "message": "OK",
+              "cursor": null
+            }
+          },
+          {
+            "path": "/x/v2/reply/wbi/main",
+            "status": 200,
+            "result": {
+              "code": 0,
+              "message": "OK",
+              "count": 3,
+              "cursor": {
+                "is_end": true,
+                "all_count": 48
+              }
+            }
+          }
+        ]
+      },
+      {
+        "extensionEnabled": true,
+        "errors": [
+          "Uncaught HierarchyRequestError: Failed to execute 'appendChild' on 'Node': This node type does not support this method."
+        ],
+        "consoleErrors": [
+          "TypeError: n.setAttribute is not a function\n    at Array.Cr (https://s1.hdslb.com/bfs/static/jinkela/video/video.f4ca9b1e257f91ba8b11a351f85ff687148880e4.js:6:44745)\n    at k (https://s1.hdslb.com/bfs/static/jinkela/video/video.f4ca9b1e257f91ba8b11a351f85ff687148880e4.js:6:59462)\n    at a.__patch__ (https://s1.hdslb.com/bfs/static/jinkela/video/video.f4ca9b1e257f91ba8b11a351f85ff687148880e4.js:6:61293)\n    at e._update (https://s1.hdslb.com/bfs/static/jinkela/video/video.f4ca9b1e257f91ba8b11a351f85ff687148880e4.js:6:34420)\n    at a.r (https://s1.hdslb.com/bfs/static/jinkela/video/video.f4ca9b1e257f91ba8b11a351f85ff687148880e4.js:6:68565)\n    at vn.get (https://s1.hdslb.com/bfs/static/jinkela/video/video.f4ca9b1e257f91ba8b11a351f85ff687148880e4.js:6:26772)\n    at vn.run (https://s1.hdslb.com/bfs/static/jinkela/video/video.f4ca9b1e257f91ba8b11a351f85ff687148880e4.js:6:27656)\n    at hn (https://s1.hdslb.com/bfs/static/jinkela/video/video.f4ca9b1e257f91ba8b11a351f85ff687148880e4.js:6:25764",
+          "[Mirror]: 无法解析的错误: Script error."
+        ],
+        "commentHostChildren": 0,
+        "commentRequests": []
+      }
+    ],
+    "fixed": [
+      {
+        "extensionEnabled": false,
+        "errors": [],
+        "consoleErrors": [],
+        "commentHostChildren": 1,
+        "commentRequests": [
+          {
+            "path": "/x/v2/reply/subject/description",
+            "status": 200,
+            "result": {
+              "code": 0,
+              "message": "OK",
+              "cursor": null
+            }
+          },
+          {
+            "path": "/x/v2/reply/wbi/main",
+            "status": 200,
+            "result": {
+              "code": 0,
+              "message": "OK",
+              "count": 3,
+              "cursor": {
+                "is_end": true,
+                "all_count": 48
+              }
+            }
+          }
+        ]
+      },
+      {
+        "extensionEnabled": true,
+        "errors": [],
+        "consoleErrors": [],
+        "commentHostChildren": 1,
+        "commentRequests": [
+          {
+            "path": "/x/v2/reply/subject/description",
+            "status": 200,
+            "result": {
+              "code": 0,
+              "message": "OK",
+              "cursor": null
+            }
+          },
+          {
+            "path": "/x/v2/reply/wbi/main",
+            "status": 200,
+            "result": {
+              "code": 0,
+              "message": "OK",
+              "count": 3,
+              "cursor": {
+                "is_end": true,
+                "all_count": 48
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "page": {
+    "video": "BV137sU6pEcr",
+    "errors": [],
+    "consoleErrors": [],
+    "commentRequests": [
+      {
+        "path": "/x/v2/reply/subject/description",
+        "status": 200
+      },
+      {
+        "path": "/x/v2/reply/wbi/main",
+        "status": 200
+      },
+      {
+        "path": "/bfs/reply/9f3ad0659e84c96a711b88dd33f4bc2e945045e0.png",
+        "status": 200
+      }
+    ],
+    "before": {
+      "state": "off",
+      "label": "未开启",
+      "widgetCount": 1,
+      "widgetParent": "BODY",
+      "overlap": 0,
+      "video": {
+        "time": 0.740582,
+        "paused": true,
+        "ready": 4,
+        "volume": 0.37,
+        "muted": true,
+        "rate": 1.25,
+        "frames": 27
+      },
+      "commentComponent": true,
+      "commentThreads": 0,
+      "pageHydrated": true,
+      "nativeSourceRestored": true
+    },
+    "firstOn": {
+      "state": "on",
+      "label": "60 fps",
+      "widgetCount": 1,
+      "widgetParent": "BODY",
+      "overlap": 0,
+      "video": {
+        "time": 3.814558,
+        "paused": false,
+        "ready": 4,
+        "volume": 0.37,
+        "muted": true,
+        "rate": 1.25,
+        "frames": 190
+      },
+      "commentComponent": true,
+      "commentThreads": 0,
+      "pageHydrated": true,
+      "nativeSourceRestored": false
+    },
+    "lazyCommentsOn": {
+      "state": "on",
+      "label": "60 fps",
+      "widgetCount": 1,
+      "widgetParent": "BODY",
+      "overlap": 0,
+      "video": {
+        "time": 3.815966,
+        "paused": true,
+        "ready": 4,
+        "volume": 0.37,
+        "muted": true,
+        "rate": 1.25,
+        "frames": 190
+      },
+      "commentComponent": true,
+      "commentThreads": 2,
+      "pageHydrated": true,
+      "nativeSourceRestored": false
+    },
+    "off": {
+      "state": "off",
+      "label": "未开启",
+      "widgetCount": 1,
+      "widgetParent": "BODY",
+      "overlap": 0,
+      "video": {
+        "time": 3.815966,
+        "paused": true,
+        "ready": 4,
+        "volume": 0.37,
+        "muted": true,
+        "rate": 1.25,
+        "frames": 118
+      },
+      "commentComponent": true,
+      "commentThreads": 2,
+      "pageHydrated": true,
+      "nativeSourceRestored": true
+    },
+    "on": {
+      "state": "on",
+      "label": "60 fps",
+      "widgetCount": 1,
+      "widgetParent": "BODY",
+      "overlap": 0,
+      "video": {
+        "time": 6.924182,
+        "paused": false,
+        "ready": 4,
+        "volume": 0.37,
+        "muted": true,
+        "rate": 1.25,
+        "frames": 193
+      },
+      "commentComponent": true,
+      "commentThreads": 2,
+      "pageHydrated": true,
+      "nativeSourceRestored": false
+    },
+    "enabledComparison": {
+      "regions": [
+        {
+          "selector": "#viewbox_report",
+          "sameNode": true
+        },
+        {
+          "selector": "#arc_toolbar_report",
+          "sameNode": true
+        },
+        {
+          "selector": ".up-info-container",
+          "sameNode": true
+        },
+        {
+          "selector": ".right-container",
+          "sameNode": true
+        },
+        {
+          "selector": "#commentapp",
+          "sameNode": true
+        }
+      ],
+      "siblingOrderPreserved": true,
+      "sameCommentComponent": true,
+      "outsidePlayerMutations": [],
+      "outsidePlayerMutationCount": 0
+    },
+    "restored": {
+      "state": "off",
+      "label": "未开启",
+      "widgetCount": 1,
+      "widgetParent": "BODY",
+      "overlap": 0,
+      "video": {
+        "time": 6.924182,
+        "paused": true,
+        "ready": 4,
+        "volume": 0.37,
+        "muted": true,
+        "rate": 1.25,
+        "frames": 61
+      },
+      "commentComponent": true,
+      "commentThreads": 2,
+      "pageHydrated": true,
+      "nativeSourceRestored": true
+    },
+    "restoredComparison": {
+      "regions": [
+        {
+          "selector": "#viewbox_report",
+          "sameNode": true
+        },
+        {
+          "selector": "#arc_toolbar_report",
+          "sameNode": true
+        },
+        {
+          "selector": ".up-info-container",
+          "sameNode": true
+        },
+        {
+          "selector": ".right-container",
+          "sameNode": true
+        },
+        {
+          "selector": "#commentapp",
+          "sameNode": true
+        }
+      ],
+      "siblingOrderPreserved": true,
+      "sameCommentComponent": true,
+      "outsidePlayerMutations": [],
+      "outsidePlayerMutationCount": 0
+    },
+    "webFullscreen": {
+      "mode": 2,
+      "parent": "bpx-player-control-bottom-right"
+    },
+    "afterFullscreen": {
+      "state": "off",
+      "label": "未开启",
+      "widgetCount": 1,
+      "widgetParent": "BODY",
+      "overlap": 0,
+      "video": {
+        "time": 6.924182,
+        "paused": true,
+        "ready": 4,
+        "volume": 0.37,
+        "muted": true,
+        "rate": 1.25,
+        "frames": 61
+      },
+      "commentComponent": true,
+      "commentThreads": 2,
+      "pageHydrated": true,
+      "nativeSourceRestored": true
+    },
+    "passed": true
+  },
+  "endOfStream": {
+    "passed": true,
+    "ended": {
+      "state": "on",
+      "label": "60 fps",
+      "time": 258.252334,
+      "duration": 258.252334,
+      "ended": true,
+      "paused": true,
+      "ready": 4,
+      "frames": 375,
+      "buffer": [
+        [
+          252,
+          258.252334
+        ]
+      ]
+    },
+    "stableEnd": {
+      "state": "on",
+      "label": "60 fps",
+      "time": 258.252334,
+      "duration": 258.252334,
+      "ended": true,
+      "paused": true,
+      "ready": 4,
+      "frames": 375,
+      "buffer": [
+        [
+          252,
+          258.252334
+        ]
+      ]
+    },
+    "replayed": {
+      "state": "on",
+      "label": "60 fps",
+      "time": 21.011815,
+      "duration": 258.252334,
+      "ended": false,
+      "paused": false,
+      "ready": 4,
+      "frames": 441,
+      "buffer": [
+        [
+          20,
+          27.999999
+        ],
+        [
+          252,
+          258.252334
+        ]
+      ]
+    },
+    "continued": {
+      "state": "on",
+      "label": "60 fps",
+      "time": 25.022471,
+      "duration": 258.252334,
+      "ended": false,
+      "paused": false,
+      "ready": 4,
+      "frames": 682,
+      "buffer": [
+        [
+          20,
+          39.999999
+        ],
+        [
+          252,
+          258.252334
+        ]
+      ]
+    },
+    "fullscreen": {
+      "widget": {
+        "x": 307.5,
+        "y": 565,
+        "right": 440,
+        "bottom": 600,
+        "width": 132.5,
+        "height": 35
+      },
+      "video": {
+        "x": 0,
+        "y": 0,
+        "right": 800,
+        "bottom": 600,
+        "width": 800,
+        "height": 600
+      },
+      "parent": "bpx-player-control-bottom-right",
+      "controls": true,
+      "fullscreen": true,
+      "overlap": 4637.5
+    },
+    "returned": {
+      "widget": {
+        "x": 41,
+        "y": 756,
+        "right": 185.5,
+        "bottom": 790.796875,
+        "width": 144.5,
+        "height": 34.796875
+      },
+      "video": {
+        "x": 41,
+        "y": 168,
+        "right": 1004,
+        "bottom": 710,
+        "width": 963,
+        "height": 542
+      },
+      "parent": "win",
+      "controls": false,
+      "fullscreen": false,
+      "overlap": 0
+    }
+  },
+  "tests": {
+    "ctest": "1/1 passed",
+    "javascript": "17/17 passed",
+    "browserCreationDelaySeconds": 5.2
+  }
+}

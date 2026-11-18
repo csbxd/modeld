@@ -8,7 +8,7 @@
   };
   const file=value=>{try{return new URL(value).pathname.split('/').pop();}catch{return '';}};
   function urls(selected,entries){
-    if(!allowed(selected))throw Error('尚未取得当前媒体地址，请先播放几秒');
+    if(!file(selected))throw Error('尚未取得当前媒体地址，请先播放几秒');
     const candidates=[];
     const add=value=>{if(typeof value==='string'&&allowed(value)&&file(value)===file(selected)&&!candidates.includes(value))candidates.push(value);};
     for(const entry of entries||[]){
@@ -19,7 +19,10 @@
       const rank=value=>{const u=new URL(value);return (u.protocol==='https:'?0:2)+(u.hostname.startsWith('upos-')?0:1);};
       return rank(a)-rank(b);
     });
-    const result=candidates.filter(value=>value!==selected);result.push(selected);return result.slice(0,9);
+    const result=candidates.filter(value=>value!==selected);
+    if(allowed(selected))result.push(selected);
+    if(!result.length)throw Error('当前媒体没有同一文件的官方备用地址');
+    return result.slice(0,9);
   }
   function probe(){
     if(active)return active.source;
@@ -29,13 +32,14 @@
     const selectedVideo=k.getCurrentPlayURLFor('video'),selectedAudio=k.getCurrentPlayURLFor('audio');
     const info=p.getManifest?.()||{};
     const videoUrls=urls(selectedVideo,manifest.video);
+    const audioEntries=manifest.audio||[];
+    if(!selectedAudio&&audioEntries.length)throw Error('当前音轨尚未准备好，请先播放几秒后再开启插帧');
     let audio=null;
     if(selectedAudio){
-      const audioEntries=manifest.audio||[];
       const exact=audioEntries.find(entry=>file(entry.baseUrl)===file(selectedAudio));
-      // The browser transport uses the AAC track list; FLAC/Dolby are separate lists.
-      const candidate=exact?.baseUrl||audioEntries[0]?.baseUrl;
-      if(candidate)audio=urls(exact?selectedAudio:candidate,audioEntries);
+      // The browser transport accepts the selected AAC track without changing audio quality.
+      if(!exact)throw Error('当前选中的音轨不在标准 AAC 列表中，请先在 B 站切换为标准音质');
+      audio=urls(selectedAudio,audioEntries);
     }
     if(v.videoWidth>0&&(Math.max(v.videoWidth,v.videoHeight)>1920||Math.min(v.videoWidth,v.videoHeight)>1080))
       throw Error('请在 B 站选择 1080p 或以下画质');
@@ -64,7 +68,7 @@
       setVolume:n=>{v.volume=n;},getVolume:()=>v.volume,setMute:n=>{v.muted=n;},isMuted:()=>v.muted,
       setPlaybackRate:n=>{v.playbackRate=n;},getPlaybackRate:()=>v.playbackRate
     };
-    k.player=new Proxy(original,{get:(target,name)=>name in replacements?replacements[name]:Reflect.get(target,name)});
+    k.player=new Proxy(original,{get:(target,name)=>Object.hasOwn(replacements,name)?replacements[name]:Reflect.get(target,name)});
     active={source,k,original,originalSource,v,p};
     v.src=url;v.playbackRate=rate;v.volume=volume;v.muted=muted;
     return {position:time,paused,rate,volume,muted};

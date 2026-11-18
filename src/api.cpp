@@ -11,7 +11,9 @@ Json ApiClient::request(const std::string &method, const std::string &path, cons
     if (method != "GET" && method != "POST" && method != "PUT" && method != "DELETE")
         throw Error(422, "Unsupported API method");
     auto client = connection();
-    const bool opening = method == "POST" && path == std::string(api_prefix) + "/sessions";
+    const bool opening = method == "POST" &&
+                         (path == std::string(api_prefix) + "/sessions" ||
+                          path == std::string(api_prefix) + "/browser/sessions");
     const int timeout = opening ? config_.request_timeout_seconds : method == "DELETE" ? 3 : 5;
     client->set_connection_timeout(std::min(5, timeout));
     client->set_read_timeout(timeout);

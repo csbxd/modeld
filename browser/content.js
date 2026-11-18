@@ -8,17 +8,17 @@
   const bytes=value=>{const text=atob(value.base64),result=new Uint8Array(text.length);for(let i=0;i<text.length;i++)result[i]=text.charCodeAt(i);return result;};
   const routeKey=()=>location.pathname+'?p='+(new URLSearchParams(location.search).get('p')||'1');
   const video=()=>document.querySelector('.bpx-player-video-wrap video,video,bwp-video');
-  let player=null,epoch=0,preferences=null,starting=false,phase='off',error='',originalRoute='';
+  let player=null,closing=null,epoch=0,preferences=null,starting=false,phase='off',error='',originalRoute='';
   const root=document.createElement('div');root.id='modeld-browser';
   const shadow=root.attachShadow({mode:'open'});
   shadow.innerHTML=`<style>
-    :host{display:block;width:max-content;max-width:100%;margin-left:auto;padding:8px 0;box-sizing:border-box;font:12px/1.4 system-ui,sans-serif;color:#334b48}
+    :host{position:absolute;display:block;width:max-content;max-width:100%;margin:0;padding:8px 0;box-sizing:border-box;font:12px/1.4 system-ui,sans-serif;color:#334b48}
     section{display:flex;align-items:center;gap:7px;background:#f1f6f5;border:1px solid #dbe6e3;border-radius:7px;padding:3px 5px}
     button{font:inherit;cursor:pointer;color:inherit;border:0;border-radius:5px;background:transparent;padding:5px 7px;white-space:nowrap}
     button:hover{background:#16836718}button.active{background:#168367;color:#fff}
     small{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#58736b}
     .error{color:#a43119}button:focus-visible{outline:2px solid #168367}
-    :host([data-controls]){display:inline-flex;width:auto;flex-shrink:0;margin:0;padding:0;color:#fff}
+    :host([data-controls]){position:static;display:inline-flex;width:auto;flex-shrink:0;margin:0;padding:0;color:#fff}
     :host([data-controls]) section{background:transparent;border:0;padding:0}
     :host([data-controls]) small{color:#d9e7e2;max-width:140px}
     :host([data-controls]) .error{color:#ffbca9}
@@ -26,16 +26,47 @@
   const button=shadow.querySelector('#toggle'),label=shadow.querySelector('#state');
   function render(){
     button.classList.toggle('active',phase==='on'||phase==='buffering');
-    button.textContent=starting?'取消准备':phase==='on'||phase==='buffering'?'关闭插帧':'插帧 60 FPS';
-    label.textContent=error||({off:'未开启',opening:'准备中',on:'60 fps',buffering:'缓冲中'}[phase]||phase);
+    button.disabled=!!closing;
+    button.textContent=closing?'恢复原流':starting?'取消准备':phase==='on'||phase==='buffering'?'关闭插帧':'插帧 60 FPS';
+    label.textContent=error||({off:'未开启',opening:'准备中',closing:'恢复原流中',on:'60 fps',buffering:'缓冲中'}[phase]||phase);
     label.classList.toggle('error',!!error);label.title=error;
     root.dataset.state=phase;
   }
   const layoutObserver=new MutationObserver(()=>mount());
-  let observedContainer=null;
+  const sizeObserver=new ResizeObserver(()=>mount());
+  sizeObserver.observe(root);
+  let observedContainer=null,spacing=null,layoutFrame=0;
+  function scheduleLayout(){
+    if(layoutFrame)return;
+    layoutFrame=requestAnimationFrame(()=>{layoutFrame=0;mount();});
+  }
+  function restoreSpacing(){
+    if(!spacing)return;
+    const {element,value,priority,applied}=spacing;
+    if(element.style.getPropertyValue('margin-bottom')===applied){
+      if(value)element.style.setProperty('margin-bottom',value,priority);
+      else element.style.removeProperty('margin-bottom');
+    }
+    sizeObserver.unobserve(element);
+    spacing=null;
+  }
+  function reserveSpacing(element,height){
+    if(spacing?.element!==element)restoreSpacing();
+    if(!spacing||element.style.getPropertyValue('margin-bottom')!==spacing.applied){
+      spacing={element,value:element.style.getPropertyValue('margin-bottom'),
+        priority:element.style.getPropertyPriority('margin-bottom'),
+        base:parseFloat(getComputedStyle(element).marginBottom)||0};
+      sizeObserver.observe(element);
+    }
+    element.style.setProperty('margin-bottom',String(spacing.base+height)+'px',spacing.priority);
+    spacing.applied=element.style.getPropertyValue('margin-bottom');
+  }
   function mount(){
     const container=document.querySelector('.bpx-player-container')||document.querySelector('#bilibili-player,.bpx-player-primary-area');
-    if(!container)return;
+    if(!container){
+      restoreSpacing();layoutObserver.disconnect();observedContainer=null;
+      root.remove();return;
+    }
     const playerContainer=container.closest('#bilibili-player')||container;
     if(observedContainer!==playerContainer){
       layoutObserver.disconnect();
@@ -46,11 +77,17 @@
     const controls=fullscreen&&container.querySelector('.bpx-player-control-bottom-right');
     root.toggleAttribute('data-controls',!!controls);
     if(controls){
+      restoreSpacing();
       if(root.parentElement!==controls)controls.prepend(root);
       return;
     }
     const wrapper=container.closest('#playerWrap,.player-wrap')||playerContainer;
-    if(wrapper.nextElementSibling!==root)wrapper.insertAdjacentElement('afterend',root);
+    // Vue owns the wrapper's siblings. Keep extension nodes outside its hydrated tree.
+    if(root.parentElement!==document.body)document.body.append(root);
+    const rect=wrapper.getBoundingClientRect();
+    root.style.top=String(rect.bottom+scrollY)+'px';
+    root.style.left=String(rect.left+scrollX)+'px';
+    reserveSpacing(wrapper,root.getBoundingClientRect().height);
   }
   function hasRange(v,time){for(let i=0;i<v.buffered.length;i++)if(v.buffered.start(i)<=time+0.08&&v.buffered.end(i)>time+0.02)return i;return -1;}
   class Playback{
@@ -58,7 +95,7 @@
       this.created=opened.created;this.preferences=opened.preferences;this.media=this.created.manifest.media;
       this.video=video();this.source=new MediaSource();this.url=URL.createObjectURL(this.source);
       this.running=true;this.loaded=new Set();this.generation=0;this.serial=Promise.resolve();this.busy=false;
-      this.cleanups=[];this.events=[];this.initializing=true;this.lastPosition=0;
+      this.events=[];this.initializing=true;
     }
     failure(error){if(this.running&&player===this)fail(error);}
     listen(type,handler){this.video.addEventListener(type,handler);this.events.push([type,handler]);}
@@ -104,7 +141,7 @@
       const range=hasRange(this.video,this.initialTarget);
       if(range>=0&&this.video.currentTime<this.video.buffered.start(range))this.video.currentTime=this.video.buffered.start(range)+0.001;
       if(!saved.paused)await this.video.play().catch(()=>{});
-      await call('session.pause',{paused:this.video.paused});
+      await call('session.pause',{paused:this.video.paused}).catch(()=>{});
       this.timer=setInterval(()=>this.pump().catch(error=>this.failure(error)),300);
       this.statusTimer=setInterval(()=>{
         if(!this.running)return;
@@ -154,22 +191,28 @@
       clearInterval(this.timer);clearInterval(this.statusTimer);
       for(const [type,handler]of this.events)this.video.removeEventListener(type,handler);
       if(this.buffer?.updating)try{this.buffer.abort();}catch{}
-      await call('session.stop').catch(()=>{});
+      const closed=call('session.stop').catch(()=>{});
       await call('page.restore').catch(()=>{});
+      await closed;
       URL.revokeObjectURL(this.url);
     }
   }
   async function stop(){
+    if(closing)return closing;
     epoch++;starting=false;
     const current=player;player=null;
-    if(current)await current.stop();else await call('session.stop').catch(()=>{});
-    phase='off';render();
+    phase='closing';
+    closing=(async()=>{
+      if(current)await current.stop();else await call('session.stop').catch(()=>{});
+    })().finally(()=>{closing=null;phase='off';render();});
+    render();return closing;
   }
   async function fail(cause){
     const message=cause?.message||String(cause);
     await stop();error=message;render();
   }
   async function toggle(){
+    if(closing)return;
     if(starting||player){await stop();return;}
     error='';phase='opening';starting=true;render();const current=++epoch;
     try{
@@ -197,6 +240,8 @@
   },1000);
   window.addEventListener('modeld.native-source-change',()=>stop());
   document.addEventListener('fullscreenchange',()=>mount());
+  window.addEventListener('resize',()=>scheduleLayout());
+  window.addEventListener('scroll',()=>scheduleLayout(),{passive:true});
   window.addEventListener('pagehide',()=>call('session.stop').catch(()=>{}));
   mount();render();
   call('config.get').then(value=>{

@@ -292,5 +292,18 @@
     "fullscreen": false,
     "overlap": 0
   },
-  "passed": true
+  "passed": true,
+  "installation": {
+    "package": "www-plugins/modeld-browser-2.1.1::gentoo-cs",
+    "gentoo_test_passed": true,
+    "source_sha256": "0e57adc5a6141e7df914459e250dfa2e65f89f6177b969503c2ec60b188f8074",
+    "crx_sha256": "e9d82b5136034222169b33267e1b8977f4117b8baad68afe890306e80c8b999d",
+    "normal_chrome": {
+      "version": "2.1.1",
+      "id": "iegbohgbehnfnnnkmgaolhhffinebpdk"
+    },
+    "chrome_installation_location": 6,
+    "chrome_path": "iegbohgbehnfnnnkmgaolhhffinebpdk/2.1.1_0",
+    "passed": true
+  }
 }

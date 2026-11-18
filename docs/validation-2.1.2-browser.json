@@ -448,11 +448,25 @@
       "controls": false,
       "fullscreen": false,
       "overlap": 0
-    }
+    },
+    "nativeHostVersion": "2.1.1"
   },
   "tests": {
     "ctest": "1/1 passed",
     "javascript": "17/17 passed",
     "browserCreationDelaySeconds": 5.2
+  },
+  "installation": {
+    "package": "www-plugins/modeld-browser-2.1.2::gentoo-cs",
+    "gentooTestsPassed": true,
+    "normalChrome": {
+      "version": "2.1.2",
+      "id": "iegbohgbehnfnnnkmgaolhhffinebpdk"
+    },
+    "signedSourcesMatch": true,
+    "manifestMatches": true,
+    "feedbackPageOpen": false,
+    "sourceSha256": "c03a2ec38fa5194405e6567e837b4306674c70b254e77582a4ad0660e9ef2823",
+    "crxSha256": "68659f7629f0dbd9231d28bdec336f9dab39032a91556fe31f984d1db2632ad3"
   }
 }

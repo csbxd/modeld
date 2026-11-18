@@ -1,6 +1,6 @@
 # B 站浏览器插帧
 
-Chrome Manifest V3 扩展，在 B 站原播放器里使用远端 RIFE 4.26 Heavy FP32。原播放按钮、进度条、音量、倍速、全屏和网页弹幕继续使用同一个 video 元素。点击播放器右上角“插帧 60 FPS”，或按 **Alt+Shift+I**；再次点击恢复 B 站原流。
+Chrome Manifest V3 扩展，在 B 站原播放器里使用远端 RIFE 4.26 Heavy FP32。原播放按钮、进度条、音量、倍速、全屏和网页弹幕继续使用同一个 video 元素。普通窗口下，点击播放器下方“插帧 60 FPS”；全屏和网页全屏下，按钮位于原播放器控制条。也可按 **Alt+Shift+I**；再次点击恢复 B 站原流。
 
 ## 配置
 
@@ -30,6 +30,7 @@ emerge --ask www-plugins/modeld-browser::gentoo-cs
 - fMP4 初始化头共享，片段保留绝对音视频解码时间，独立片段可用于远距离定位。
 - 播放时暂停并卸下原 DASH source，以 MediaSource 接管相同 video。播放器内核通过 adapter 读取新的时钟和缓冲；关闭时重接原 DASH source 并恢复当前位置。原播放器可继续自行选择合适的源画质。
 - 分段按需读取，MSE 保留配置的后向范围，后台字节缓存按 LRU 回收。页面离开或会话关闭会取消远端工作。
+- 末段追加完成后调用 MediaSource.endOfStream，让浏览器正常触发片尾事件。片尾后定位到未缓冲的位置仍可追加分段并继续播放。
 
 ## 开发验证
 
@@ -38,9 +39,11 @@ cmake -S . -B build-browser -G Ninja -DMODELD_CLIENT=OFF \
   -DMODELD_SERVER=OFF -DMODELD_BROWSER=ON
 cmake --build build-browser
 ctest --test-dir build-browser --output-on-failure
-node --test tests/browser.test.mjs
+node --test tests/browser*.test.mjs
 ```
 
 Chrome 开发测试使用独立 profile、开发者模式和 unpacked 扩展。`tools/browser/verify.mjs` 通过实际 Chrome 检查 B 站播放、解码帧数、原控制条暂停/定位及恢复。正式安装使用已签名 CRX，不要求用户开启开发者模式。
+
+对已打开的测试视频运行 `node tools/browser/verify-end.mjs CHROME_PROFILE REPORT_DIRECTORY BVID`，可验证片尾结束、结束后向未缓冲位置定位、普通窗口控件布局和全屏切换。对应回归记录在 `docs/validation-2.1.1-browser.json`。
 
 签名私钥保存在维护者的私有目录，不随源码或 ebuild 分发。扩展公钥在 manifest 中固定，便于本机程序限制允许的扩展来源。

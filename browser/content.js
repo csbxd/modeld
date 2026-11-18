@@ -11,7 +11,18 @@
   let player=null,epoch=0,preferences=null,starting=false,phase='off',error='',originalRoute='';
   const root=document.createElement('div');root.id='modeld-browser';
   const shadow=root.attachShadow({mode:'open'});
-  shadow.innerHTML='<style>:host{position:absolute;right:18px;top:16px;z-index:10020;display:block;font:12px/1.4 system-ui,sans-serif;color:#fff}section{display:flex;align-items:center;gap:7px;background:#15252ae8;box-shadow:0 3px 18px #0004;border:1px solid #ffffff24;border-radius:9px;padding:5px 7px;backdrop-filter:blur(12px)}button{font:inherit;cursor:pointer;color:inherit;border:0;border-radius:6px;background:transparent;padding:5px 7px}button:hover{background:#ffffff20}button.active{background:#168367}small{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#c8d9d5}.error{color:#ffbca9}button:focus-visible{outline:2px solid #64e4b8}</style><section><button id="toggle" title="Alt+Shift+I">插帧 60 FPS</button><small id="state">未开启</small><button id="settings" title="插帧设置">⚙</button></section>';
+  shadow.innerHTML=`<style>
+    :host{display:block;width:max-content;max-width:100%;margin-left:auto;padding:8px 0;box-sizing:border-box;font:12px/1.4 system-ui,sans-serif;color:#334b48}
+    section{display:flex;align-items:center;gap:7px;background:#f1f6f5;border:1px solid #dbe6e3;border-radius:7px;padding:3px 5px}
+    button{font:inherit;cursor:pointer;color:inherit;border:0;border-radius:5px;background:transparent;padding:5px 7px;white-space:nowrap}
+    button:hover{background:#16836718}button.active{background:#168367;color:#fff}
+    small{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#58736b}
+    .error{color:#a43119}button:focus-visible{outline:2px solid #168367}
+    :host([data-controls]){display:inline-flex;width:auto;flex-shrink:0;margin:0;padding:0;color:#fff}
+    :host([data-controls]) section{background:transparent;border:0;padding:0}
+    :host([data-controls]) small{color:#d9e7e2;max-width:140px}
+    :host([data-controls]) .error{color:#ffbca9}
+  </style><section><button id="toggle" title="Alt+Shift+I">插帧 60 FPS</button><small id="state">未开启</small><button id="settings" title="插帧设置">⚙</button></section>`;
   const button=shadow.querySelector('#toggle'),label=shadow.querySelector('#state');
   function render(){
     button.classList.toggle('active',phase==='on'||phase==='buffering');
@@ -20,7 +31,27 @@
     label.classList.toggle('error',!!error);label.title=error;
     root.dataset.state=phase;
   }
-  function mount(){const container=document.querySelector('.bpx-player-container,#bilibili-player,.bpx-player-primary-area');if(container&&!root.isConnected)container.append(root);}
+  const layoutObserver=new MutationObserver(()=>mount());
+  let observedContainer=null;
+  function mount(){
+    const container=document.querySelector('.bpx-player-container')||document.querySelector('#bilibili-player,.bpx-player-primary-area');
+    if(!container)return;
+    const playerContainer=container.closest('#bilibili-player')||container;
+    if(observedContainer!==playerContainer){
+      layoutObserver.disconnect();
+      layoutObserver.observe(playerContainer,{attributes:true,attributeFilter:['class']});
+      observedContainer=playerContainer;
+    }
+    const fullscreen=document.fullscreenElement?.contains(container)||container.closest('.mode-webscreen,.mode-fullscreen');
+    const controls=fullscreen&&container.querySelector('.bpx-player-control-bottom-right');
+    root.toggleAttribute('data-controls',!!controls);
+    if(controls){
+      if(root.parentElement!==controls)controls.prepend(root);
+      return;
+    }
+    const wrapper=container.closest('#playerWrap,.player-wrap')||playerContainer;
+    if(wrapper.nextElementSibling!==root)wrapper.insertAdjacentElement('afterend',root);
+  }
   function hasRange(v,time){for(let i=0;i<v.buffered.length;i++)if(v.buffered.start(i)<=time+0.08&&v.buffered.end(i)>time+0.02)return i;return -1;}
   class Playback{
     constructor(opened){
@@ -59,6 +90,10 @@
       this.source.duration=this.media.duration_seconds;
       this.initialTarget=Math.min(saved.position,this.media.duration_seconds-0.05);
       this.video.currentTime=this.initialTarget;
+      this.listen('modeld.before-seek',()=>{
+        if(this.source.readyState==='ended'&&!this.buffer.updating)
+          this.buffer.timestampOffset=this.buffer.timestampOffset;
+      });
       this.listen('seeking',()=>{if(this.initializing||!this.running)return;this.generation++;this.loaded.clear();this.pump().catch(error=>this.failure(error));});
       this.listen('play',()=>call('session.pause',{paused:false}).catch(()=>{}));
       this.listen('pause',()=>call('session.pause',{paused:true}).catch(()=>{}));
@@ -90,9 +125,16 @@
         if(!this.running||generation!==this.generation)return;
         await this.append(bytes(data));this.loaded.add(i);
       }
+      // Signal EOF once the tail is available, including a tail retained across a backward seek.
+      if(this.loaded.has(this.media.segment_count-1)||hasRange(this.video,this.media.duration_seconds-0.05)>=0){
+        await this.mutate(()=>{
+          if(this.source.readyState==='open')this.source.endOfStream();
+        });
+      }
     }
     async pump(){
-      if(!this.running||this.busy||!this.buffer||this.source.readyState!=='open')return;
+      // Appending after a seek reopens an ended MediaSource.
+      if(!this.running||this.busy||!this.buffer||this.source.readyState==='closed')return;
       this.busy=true;
       try{
         const position=this.video.currentTime,range=hasRange(this.video,position);
@@ -154,6 +196,7 @@
     if(player&&(!player.video.isConnected||routeKey()!==originalRoute))stop();
   },1000);
   window.addEventListener('modeld.native-source-change',()=>stop());
+  document.addEventListener('fullscreenchange',()=>mount());
   window.addEventListener('pagehide',()=>call('session.stop').catch(()=>{}));
   mount();render();
   call('config.get').then(value=>{

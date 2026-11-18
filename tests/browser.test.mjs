@@ -6,11 +6,21 @@ import fs from'node:fs';
 import os from'node:os';
 import path from'node:path';
 import{Native}from'../tools/browser/native.mjs';
-test('preferences are bounded and manual by default',()=>{
+test('preferences validate values and are manual by default',()=>{
  assert.equal(defaults.autoEnable,false);
  assert.equal(preferences({bufferSeconds:8,qp:16}).cacheMiB,256);
- for(const value of [{bufferSeconds:0},{cacheMiB:8192},{qp:-1},{backSeconds:9999}])
+ for(const value of [{bufferSeconds:0},{cacheMiB:8192},{qp:-1},{backSeconds:-1}])
   assert.throws(()=>preferences(value));
+});
+test('buffer durations accept large safe integers and survive storage serialization',()=>{
+ for(const seconds of [3600,86400,365*86400,Number.MAX_SAFE_INTEGER]){
+  const saved=JSON.parse(JSON.stringify(preferences({bufferSeconds:seconds,backSeconds:seconds})));
+  assert.equal(preferences(saved).bufferSeconds,seconds);
+  assert.equal(preferences(saved).backSeconds,seconds);
+ }
+ for(const name of ['bufferSeconds','backSeconds'])
+  for(const seconds of [NaN,Infinity,-Infinity,1.5,Number.MAX_SAFE_INTEGER+1,'3600',null])
+   assert.throws(()=>preferences({[name]:seconds}));
 });
 test('native host never exposes the credential and rejects foreign media hosts',async()=>{
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'modeld-host-'));

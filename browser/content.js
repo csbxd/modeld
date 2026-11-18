@@ -155,23 +155,34 @@
     }
     async fill(time,count){
       const start=Math.max(0,Math.floor(time/this.media.segment_seconds)),generation=this.generation;
+      let appendedTail=false;
       for(let i=start;i<Math.min(this.media.segment_count,start+count);i++){
         if(!this.running||generation!==this.generation)return;
-        if(this.loaded.has(i))continue;
+        if(this.loaded.has(i)&&this.segmentPresent(i))continue;
         const data=await call('media.segment',{index:i});
         if(!this.running||generation!==this.generation)return;
         await this.append(bytes(data));this.loaded.add(i);
+        if(i===this.media.segment_count-1)appendedTail=true;
       }
       // Signal EOF once the tail is available, including a tail retained across a backward seek.
-      if(this.loaded.has(this.media.segment_count-1)||hasRange(this.video,this.media.duration_seconds-0.05)>=0){
+      if(appendedTail||this.segmentPresent(this.media.segment_count-1)){
         await this.mutate(()=>{
           if(this.source.readyState==='open')this.source.endOfStream();
         });
       }
     }
+    segmentPresent(index){
+      const start=index*this.media.segment_seconds;
+      const end=Math.min(start+this.media.segment_seconds,this.media.duration_seconds);
+      const tolerance=Math.min(0.08,(end-start)/4);
+      for(let i=0;i<this.video.buffered.length;i++)
+        if(this.video.buffered.start(i)<=start+tolerance&&this.video.buffered.end(i)>=end-tolerance)return true;
+      return false;
+    }
     async pump(){
       // Appending after a seek reopens an ended MediaSource.
       if(!this.running||this.busy||!this.buffer||this.source.readyState==='closed')return;
+      if(this.source.readyState==='ended'&&this.video.ended)return;
       this.busy=true;
       try{
         const position=this.video.currentTime,range=hasRange(this.video,position);
@@ -184,6 +195,8 @@
         const trim=position-this.preferences.backSeconds;
         if(trim>0&&this.video.buffered.length&&this.video.buffered.start(0)<trim-5)
           await this.mutate(()=>new Promise((resolve,reject)=>{this.buffer.addEventListener('updateend',resolve,{once:true});try{this.buffer.remove(0,trim);}catch(error){reject(error);}}));
+      }catch(error){
+        if(error.name!=='QuotaExceededError')throw error;
       }finally{this.busy=false;}
     }
     async stop(){

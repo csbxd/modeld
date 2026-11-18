@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "B站 RIFE 插帧",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "description": "通过 modeld 远端 GPU，在 B 站播放器内进行 RIFE Heavy FP32 插帧。",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnMNPG0UzW0UzOBZCanBKTIjo165xFVQPEkqMt0FNsx6HStRILC6qyQ+aRrZM2/g4QMgyr9z5vL8fHWA6GHZID57lHPTN+EZR22geyRRR5/2uDom14oQ/N1CUpsd3H0WNdYaUH9tzCSqE357hL/i42tY7wJ0c5MVuNoySJBYhPNnmm8Yl2CBEPmroYRUAqP0lC3AR5wMzTXx0ENI7ZJDQUzlG7xsH+YoVB0OCaiX1laOlNqmQsLaD+yD/VT9lwGolkZssIx6xZOMn6AkS4RXQuhAvD/6g4536F9lolFhfPUJHASuUrfPr0SNP6wWK0N4TSQmWhmdpwxPTa5Tn6qJuowIDAQAB",
   "permissions": [

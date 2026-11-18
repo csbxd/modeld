@@ -9,6 +9,9 @@ pub struct Segment {
     pub render_seconds: f64,
 }
 pub trait Stream: Send + Sync {
+    fn content_type(&self) -> &str {
+        "video/x-matroska"
+    }
     fn media(&self) -> &Media;
     fn initialization(&self) -> Arc<Vec<u8>>;
     fn render(&self, index: u64) -> Result<Segment>;

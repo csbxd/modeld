@@ -34,6 +34,7 @@ extern "C" {
         cancellation: *mut c_void,
     ) -> *mut c_void;
     fn modeld_stream_description(stream: *mut c_void) -> *const c_char;
+    fn modeld_stream_content_type(stream: *mut c_void) -> *const c_char;
     fn modeld_stream_init(stream: *mut c_void, out: *mut RawSegment) -> c_int;
     fn modeld_stream_render(stream: *mut c_void, index: u64, out: *mut RawSegment) -> c_int;
     fn modeld_stream_cancel(stream: *mut c_void);
@@ -118,6 +119,7 @@ struct NativeStream {
     ptr: NonNull<c_void>,
     media: Media,
     initialization: Arc<Vec<u8>>,
+    content_type: String,
     _backend: Arc<Backend>,
 }
 // Stream is published after probing. Only Scheduler calls render; cancel only sets an atomic flag.
@@ -143,7 +145,7 @@ impl Engine for Backend {
         let settings = cstring(
             &serde_json::json!({"segment_seconds":config.output.segment_seconds,
             "encoder":config.output.codec.encoder(),"qp":config.output.qp,
-            "source_timeout_seconds":config.limits.source_timeout_seconds})
+            "source_timeout_seconds":config.limits.source_timeout_seconds,"fragmented_mp4":config.output.browser})
             .to_string(),
         )?;
         let guard = Guard(
@@ -170,6 +172,9 @@ impl Engine for Backend {
             return Err(error());
         }
         let initialization = Arc::new(header.bytes());
+        let content_type = unsafe { CStr::from_ptr(modeld_stream_content_type(guard.0.as_ptr())) }
+            .to_string_lossy()
+            .into_owned();
         if initialization.is_empty() {
             return Err(ApiError::new(
                 502,
@@ -183,11 +188,15 @@ impl Engine for Backend {
             ptr,
             media,
             initialization,
+            content_type,
             _backend: self,
         }))
     }
 }
 impl Stream for NativeStream {
+    fn content_type(&self) -> &str {
+        &self.content_type
+    }
     fn media(&self) -> &Media {
         &self.media
     }

@@ -45,6 +45,8 @@ pub struct Output {
     pub segment_seconds: u32,
     pub codec: Codec,
     pub qp: u32,
+    #[serde(skip)]
+    pub browser: bool,
 }
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -66,6 +68,7 @@ impl Default for Output {
             segment_seconds: 2,
             codec: Codec::Hevc,
             qp: 18,
+            browser: false,
         }
     }
 }

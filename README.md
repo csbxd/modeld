@@ -1,10 +1,14 @@
-# modeld 2.0
+# modeld 2.1
 
 通过远端 GPU 为 mpv 提供 **RIFE 4.26 Heavy FP32** 插帧。控制与调度使用 Rust，视频处理使用 C++/CUDA，mpv 接入使用原生 C 插件。生产程序无需 Python 或 VapourSynth。
 
 2.0 重新设计了协议、会话生命周期和播放器状态管理，只提供完整主媒体：**60 fps 插帧画面 + 原音轨 + 内封字幕**。两端使用同一套 `/api/v2` 接口和 JSON 时间轴，旧 API 与纯视频输出已移除。[接口文档](docs/api.md)、[模块与设计约束](docs/architecture.md)、[真实 GPU 与播放器验证](docs/validation-2.0.0.json)、[两端安装与正式服务验证](docs/validation-2.0.0-installed.json)。
 
-## 播放
+## 浏览器内播放
+
+[浏览器扩展](docs/browser.md)可在 B 站原播放器内补到 60 fps，并提供服务、缓冲、缓存与编码画质设置。安装 `www-plugins/modeld-browser::gentoo-cs`，浏览器扩展会复用本机连接配置。原 mpv 功能继续保留。
+
+## mpv 播放
 
 打开视频后按 **Ctrl+Shift+i** 开启，再按恢复原视频。准备期间原视频继续播放，再次按键可取消。新文件默认关闭插帧，日式 2D 动漫保持原视频即可。
 

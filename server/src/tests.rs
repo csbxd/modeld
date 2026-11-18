@@ -44,6 +44,7 @@ struct Fake {
     gate: Option<Arc<Gate>>,
 }
 struct FakeStream {
+    browser: bool,
     media: Media,
     calls: Arc<Mutex<BTreeMap<u64, usize>>>,
     canceled: Arc<AtomicUsize>,
@@ -54,7 +55,7 @@ impl Engine for Fake {
     fn open(
         self: Arc<Self>,
         _: &CreateSession,
-        _: &Config,
+        config: &Config,
         cancellation: Arc<Cancellation>,
     ) -> Result<Arc<dyn Stream>> {
         if self.probe_block.load(Ordering::Acquire) {
@@ -66,6 +67,7 @@ impl Engine for Fake {
             return Err(ApiError::new(499, "canceled", "Probe canceled"));
         }
         Ok(Arc::new(FakeStream {
+            browser: config.output.browser,
             media: Media {
                 width: 320,
                 height: 180,
@@ -84,6 +86,13 @@ impl Engine for Fake {
     }
 }
 impl Stream for FakeStream {
+    fn content_type(&self) -> &str {
+        if self.browser {
+            "video/mp4; codecs=\"avc1.64002A,mp4a.40.2\""
+        } else {
+            "video/x-matroska"
+        }
+    }
     fn media(&self) -> &Media {
         &self.media
     }
@@ -390,5 +399,75 @@ async fn disconnecting_probe_cancels_native_work_and_releases_its_slot() {
             .await
             .0,
         201
+    );
+}
+#[tokio::test]
+async fn browser_profile_has_its_own_authenticated_contract() {
+    let app = App::new(config(), TOKEN.into(), Arc::new(Fake::default()));
+    let router = api::router(app.clone());
+    assert_eq!(
+        json_request(
+            router.clone(),
+            "GET",
+            "/api/v2/browser/capabilities",
+            None,
+            false
+        )
+        .await
+        .0,
+        401
+    );
+    let (_, capabilities) = json_request(
+        router.clone(),
+        "GET",
+        "/api/v2/browser/capabilities",
+        None,
+        true,
+    )
+    .await;
+    assert_eq!(capabilities["video_codec"], "h264");
+    let mut request = body();
+    request["qp"] = 41.into();
+    assert_eq!(
+        json_request(
+            router.clone(),
+            "POST",
+            "/api/v2/browser/sessions",
+            Some(request),
+            true
+        )
+        .await
+        .0,
+        422
+    );
+    let (status, created) = json_request(
+        router.clone(),
+        "POST",
+        "/api/v2/browser/sessions",
+        Some(body()),
+        true,
+    )
+    .await;
+    assert_eq!(status, 201);
+    assert!(created["mime_type"]
+        .as_str()
+        .unwrap()
+        .starts_with("video/mp4"));
+    let id = created["id"].as_str().unwrap();
+    assert_eq!(
+        json_request(
+            router,
+            "DELETE",
+            &format!("/api/v2/sessions/{id}"),
+            None,
+            true
+        )
+        .await
+        .0,
+        204
+    );
+    assert!(
+        !app.config.output.browser,
+        "a browser request cannot change the mpv default"
     );
 }

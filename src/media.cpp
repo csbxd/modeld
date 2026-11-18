@@ -14,8 +14,10 @@ extern "C" {
 #include <cmath>
 #include <cstring>
 #include <deque>
+#include <iomanip>
 #include <iostream>
 #include <limits>
+#include <sstream>
 namespace modeld {
 namespace {
 void avcheck(int value, const char *operation) {
@@ -77,6 +79,64 @@ struct Mux {
     AVFormatContext *format = nullptr;
     AVIOContext *io = nullptr;
     std::vector<uint8_t> bytes;
+    std::vector<int64_t> first_dts;
+    void packet(AVPacket *packet) {
+        auto &first = first_dts.at(packet->stream_index);
+        if (first == AV_NOPTS_VALUE)
+            first = packet->dts;
+        avcheck(av_interleaved_write_frame(format, packet), "Mux output packet");
+    }
+    // Each independently generated fragment has a new MOV context. Restore
+    // absolute decode times, including the original AAC packet boundaries.
+    void absolute_decode_times() {
+        std::vector<std::optional<uint64_t>> origins(first_dts.size());
+        auto be32 = [&](size_t p) -> uint32_t {
+            if (p + 4 > bytes.size())
+                throw Error(502, "Truncated MP4 box");
+            return (uint32_t(bytes[p]) << 24) | (uint32_t(bytes[p + 1]) << 16) |
+                   (uint32_t(bytes[p + 2]) << 8) | bytes[p + 3];
+        };
+        auto children = [&](size_t begin, size_t end, auto visit) {
+            for (size_t p = begin; p < end;) {
+                const auto length = be32(p);
+                if (length < 8 || p + length > end)
+                    throw Error(502, "Invalid MP4 fragment box");
+                visit(p, p + length);
+                p += length;
+            }
+        };
+        children(0, bytes.size(), [&](size_t top, size_t top_end) {
+            if (be32(top + 4) != 0x6d6f6f66)
+                return; // moof
+            children(top + 8, top_end, [&](size_t traf, size_t traf_end) {
+                if (be32(traf + 4) != 0x74726166)
+                    return;
+                uint32_t track = 0;
+                size_t decode = 0;
+                children(traf + 8, traf_end, [&](size_t child, size_t) {
+                    if (be32(child + 4) == 0x74666864)
+                        track = be32(child + 12);
+                    if (be32(child + 4) == 0x74666474)
+                        decode = child;
+                });
+                if (!track || track > first_dts.size() || !decode)
+                    throw Error(502, "Missing MP4 track timing");
+                const auto base = first_dts[track - 1];
+                if (base < 0)
+                    throw Error(422, "Browser audio requires a nonnegative source timeline");
+                const size_t count = bytes.at(decode + 8) == 1 ? 8 : 4;
+                uint64_t value = 0;
+                for (size_t i = 0; i < count; ++i)
+                    value = (value << 8) | bytes.at(decode + 12 + i);
+                auto &origin = origins[track - 1];
+                if (!origin)
+                    origin = value;
+                value = value - *origin + static_cast<uint64_t>(base);
+                for (size_t i = 0; i < count; ++i)
+                    bytes.at(decode + 12 + count - 1 - i) = static_cast<uint8_t>(value >> (8 * i));
+            });
+        });
+    }
     ~Mux() {
         if (format) {
             format->pb = nullptr;
@@ -101,6 +161,7 @@ struct Mux {
 };
 } // namespace
 struct MediaStream::Impl {
+    bool fragmented_mp4 = false;
     AVFormatContext *input = nullptr;
     AVFormatContext *audio_input = nullptr;
     AVCodecContext *decoder = nullptr;
@@ -583,12 +644,17 @@ struct MediaStream::Impl {
         av_dict_set(&options, "forced-idr", "1", 0);
         av_dict_set(&options, "delay", "0", 0);
         av_dict_set(&options, "rc-lookahead", "0", 0);
+        if (fragmented_mp4) {
+            av_dict_set(&options, "profile", "high", 0);
+            av_dict_set(&options, "level", "4.2", 0);
+        }
         int r = avcodec_open2(encoder, codec, &options);
         av_dict_free(&options);
         avcheck(r, "Open NVENC encoder");
     }
     void mux_header(Mux &mux) {
-        avcheck(avformat_alloc_output_context2(&mux.format, nullptr, "matroska", nullptr),
+        avcheck(avformat_alloc_output_context2(&mux.format, nullptr,
+                                               fragmented_mp4 ? "mp4" : "matroska", nullptr),
                 "Create segment muxer");
         auto *out = avformat_new_stream(mux.format, nullptr);
         if (!out)
@@ -625,13 +691,21 @@ struct MediaStream::Impl {
         mux.format->max_delay = 0;
         mux.format->avoid_negative_ts = AVFMT_AVOID_NEG_TS_DISABLED;
         AVDictionary *settings = nullptr;
-        av_dict_set(&settings, "live", "1", 0);
-        av_dict_set(&settings, "cluster_time_limit", "1000", 0);
+        if (fragmented_mp4) {
+            av_dict_set(
+                &settings, "movflags",
+                "empty_moov+frag_custom+default_base_moof+skip_trailer+negative_cts_offsets", 0);
+            av_dict_set(&settings, "use_editlist", "0", 0);
+        } else {
+            av_dict_set(&settings, "live", "1", 0);
+            av_dict_set(&settings, "cluster_time_limit", "1000", 0);
+        }
         const int result = avformat_write_header(mux.format, &settings);
         av_dict_free(&settings);
         avcheck(result, "Write segment header");
         avio_flush(mux.io);
-        {
+        mux.first_dts.assign(mux.format->nb_streams, AV_NOPTS_VALUE);
+        if (!fragmented_mp4) {
             // An empty, finite Cluster lets mpv probe the init fragment without
             // reporting a truncated Matroska file. Subsequent clusters follow
             // normally, with their original absolute timestamps.
@@ -662,8 +736,7 @@ struct MediaStream::Impl {
                     packet.p->dts -= offset;
                 av_packet_rescale_ts(packet.p, track.time_base, output->time_base);
                 packet.p->stream_index = output->index;
-                avcheck(av_interleaved_write_frame(mux.format, packet.p),
-                        "Mux original audio/subtitle packet");
+                mux.packet(packet.p);
             }
             std::erase_if(track.packets, [&](const auto &p) {
                 const auto ts = p->pts != AV_NOPTS_VALUE ? p->pts : p->dts;
@@ -683,6 +756,7 @@ MediaStream::MediaStream(Input video, std::optional<Input> audio, TrackSelection
                                   std::move(factory), std::move(cancelled),
                                   settings.source_timeout_seconds)) {
     auto &v = *impl;
+    v.fragmented_mp4 = settings.fragmented_mp4;
     v.selection = tracks;
     v.audio_source = std::move(audio);
     if (settings.source_timeout_seconds < 1 || settings.source_timeout_seconds > 120)
@@ -704,6 +778,18 @@ MediaStream::MediaStream(Input video, std::optional<Input> audio, TrackSelection
                 throw;
             std::cerr << "[modeld] Initial source failed; trying backup " << v.source_index + 1
                       << '\n';
+        }
+    }
+    if (v.fragmented_mp4) {
+        if (tracks.subtitles || settings.encoder != "h264_nvenc")
+            throw Error(422, "Browser output requires H.264 without embedded subtitles");
+        int audio_tracks = 0;
+        for (const auto &track : v.copy_tracks) {
+            if (track->parameters->codec_type != AVMEDIA_TYPE_AUDIO ||
+                track->parameters->codec_id != AV_CODEC_ID_AAC || ++audio_tracks > 1)
+                throw Error(422, "Browser output supports one AAC audio track");
+            if (track->parameters->profile != AV_PROFILE_AAC_LOW)
+                throw Error(422, "Browser output requires AAC-LC audio");
         }
     }
     {
@@ -756,6 +842,12 @@ Json MediaStream::description() const {
 }
 std::vector<uint8_t> MediaStream::initialization() const {
     return impl->init_header;
+}
+std::string MediaStream::content_type() const {
+    if (!impl->fragmented_mp4)
+        return "video/x-matroska";
+    return std::string("video/mp4; codecs=\"avc1.64002A") +
+           (impl->copy_tracks.empty() ? "" : ",mp4a.40.2") + "\"";
 }
 Segment MediaStream::render(int64_t sequence) {
     auto started = Clock::now();
@@ -827,7 +919,7 @@ Segment MediaStream::render(int64_t sequence) {
                 avcheck(n, "Receive encoded frame");
                 av_packet_rescale_ts(packet.p, v.encoder->time_base, out->time_base);
                 packet.p->stream_index = out->index;
-                avcheck(av_interleaved_write_frame(mux.format, packet.p), "Mux encoded frame");
+                mux.packet(packet.p);
                 packets++;
             }
         };
@@ -868,6 +960,8 @@ Segment MediaStream::render(int64_t sequence) {
             throw Error(500, "NVENC output was delayed; zero-latency configuration is required");
         avcheck(av_write_trailer(mux.format), "Finish segment");
         avio_flush(mux.io);
+        if (v.fragmented_mp4)
+            mux.absolute_decode_times();
         v.next_segment = sequence + 1;
         return {std::move(mux.bytes), static_cast<int>(end - begin),
                 std::chrono::duration<double>(Clock::now() - started).count()};

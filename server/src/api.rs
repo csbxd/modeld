@@ -15,7 +15,8 @@ use axum::{
     routing::{get, put},
     Json, Router,
 };
-use modeld_protocol::{CreateSession, Lease, SessionCreated, MODEL, VERSION};
+use modeld_protocol::{CreateSession, Input, Lease, SessionCreated, Tracks, MODEL, VERSION};
+use serde::Deserialize;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -107,7 +108,14 @@ async fn create(
     State(app): State<Arc<App>>,
     request: std::result::Result<Json<CreateSession>, JsonRejection>,
 ) -> Result<(StatusCode, Json<SessionCreated>)> {
-    let request = body(request)?;
+    open_session(app, body(request)?, false, None).await
+}
+async fn open_session(
+    app: Arc<App>,
+    request: CreateSession,
+    browser: bool,
+    qp: Option<u32>,
+) -> Result<(StatusCode, Json<SessionCreated>)> {
     if request.model != MODEL {
         return Err(ApiError::new(404, "unknown_model", "Unknown model"));
     }
@@ -122,7 +130,12 @@ async fn create(
     let cancellation = Cancellation::new()?;
     let mut guard = Probe(Some(cancellation.clone()));
     let engine = app.engine.clone();
-    let config = app.config.clone();
+    let mut config = app.config.clone();
+    if browser {
+        config.output.codec = crate::config::Codec::H264;
+        config.output.browser = true;
+        config.output.qp = qp.unwrap_or(config.output.qp);
+    }
     let timeout = config.limits.source_timeout_seconds as u64 + 2;
     let started = Instant::now();
     let work = tokio::task::spawn_blocking(move || {
@@ -151,6 +164,46 @@ async fn create(
     );
     Ok((StatusCode::CREATED, Json(response)))
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrowserRequest {
+    model: String,
+    video: Input,
+    #[serde(default)]
+    audio: Option<Input>,
+    #[serde(default)]
+    qp: Option<u32>,
+}
+async fn browser_capabilities() -> Json<serde_json::Value> {
+    Json(
+        serde_json::json!({"schema":1,"model":MODEL,"output_fps":60,"container":"fragmented_mp4",
+        "video_codec":"h264","audio_codec":"aac_lc","precision":"fp32","qp_min":0,"qp_max":40}),
+    )
+}
+async fn browser_create(
+    State(app): State<Arc<App>>,
+    request: std::result::Result<Json<BrowserRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<serde_json::Value>)> {
+    let request = body(request)?;
+    if request.qp.is_some_and(|qp| qp > 40) {
+        return Err(ApiError::invalid("QP must be between 0 and 40"));
+    }
+    let source = CreateSession {
+        model: request.model,
+        video: request.video,
+        audio: request.audio,
+        tracks: Tracks {
+            audio: true,
+            subtitles: false,
+        },
+    };
+    let (code, Json(created)) = open_session(app.clone(), source, true, request.qp).await?;
+    let stream = app.sessions.get(&created.id)?;
+    let mut value = serde_json::to_value(&created)
+        .map_err(|_| ApiError::new(500, "invalid_response", "Cannot encode session"))?;
+    value["mime_type"] = serde_json::json!(stream.stream.content_type());
+    Ok((code, Json(value)))
+}
 async fn close(State(app): State<Arc<App>>, Path(id): Path<String>) -> StatusCode {
     app.sessions.remove(&id);
     StatusCode::NO_CONTENT
@@ -178,7 +231,7 @@ async fn initialization(State(app): State<Arc<App>>, Path(id): Path<String>) -> 
     let s = app.sessions.get(&id)?;
     s.touch();
     Ok(Response::builder()
-        .header("content-type", "video/x-matroska")
+        .header("content-type", s.stream.content_type())
         .header("cache-control", "private, max-age=3600")
         .body(Body::from(s.stream.initialization().as_ref().clone()))
         .unwrap())
@@ -197,7 +250,7 @@ async fn segment(
         let _ = app.scheduler.request(&s, index.saturating_add(1));
     }
     Ok(Response::builder()
-        .header("content-type", "video/x-matroska")
+        .header("content-type", s.stream.content_type())
         .header("cache-control", "private, max-age=60")
         .header("x-modeld-frames", result.frames.to_string())
         .header(
@@ -210,6 +263,11 @@ async fn segment(
 pub fn router(app: Arc<App>) -> Router {
     let control = Router::new()
         .route("/api/v2/models", get(models))
+        .route("/api/v2/browser/capabilities", get(browser_capabilities))
+        .route(
+            "/api/v2/browser/sessions",
+            axum::routing::post(browser_create),
+        )
         .route("/api/v2/status", get(status))
         .route("/api/v2/sessions", get(list).post(create))
         .route("/api/v2/sessions/{id}", get(inspect).delete(close))

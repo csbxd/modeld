@@ -15,6 +15,7 @@ struct Segment {
 struct RenderSettings {
     int segment_seconds = 2, qp = 18, source_timeout_seconds = 30;
     std::string encoder = "hevc_nvenc";
+    bool fragmented_mp4 = false;
 };
 using RifeFactory = std::function<std::shared_ptr<Rife>(int, int)>;
 class MediaStream {
@@ -28,6 +29,7 @@ class MediaStream {
     ~MediaStream();
     Json description() const;
     std::vector<uint8_t> initialization() const;
+    std::string content_type() const;
     Segment render(int64_t index);
 };
 } // namespace modeld

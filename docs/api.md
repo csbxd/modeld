@@ -99,3 +99,13 @@ A session state contains `progress.rendering`, `last_requested`, `last_completed
 Codes include `invalid_request`, `unauthorized`, `not_found`, `unknown_model`, `session_limit`, `queue_full`, `source_timeout`, `source_failed`, `unsupported_media`, `session_closed`, `scheduler_stopped` and `backend_failed`. A failed segment can be requested again. Source I/O is bounded and cancellation is cooperative; loading a new GPU resolution profile can add startup time.
 
 Successful segment headers include `X-Modeld-Frames` and `X-Modeld-Render-Seconds`. Audio/subtitle packet data is copied; only the interpolated video is encoded. Unsupported source formats fail explicitly.
+
+## Browser playback profile (2.1)
+
+`GET /api/v2/browser/capabilities` and `POST /api/v2/browser/sessions` require the control Bearer token.
+
+The browser create body contains `model`, `video`, optional `audio` and optional integer `qp` (0–40). Inputs use the same validated URL-list/header contract. The browser profile always selects H.264 High 4.2 with fragmented MP4 and at most one copied AAC-LC track. Embedded subtitles/attachments are omitted; the website retains its own subtitle rendering. Normal session requests keep their existing Matroska/default-encoder behavior.
+
+The response has the normal `id`, `lease_seconds` and `manifest`, plus `mime_type` for MediaSource. The browser profile uses the existing capability media routes and the standard lease/close lifecycle. Every fragment contains absolute tfdt timestamps, so clients append at their actual source timeline positions. The browser transport requires nonnegative source packet decode times.
+
+The extension communicates through the local native host; no API token or server-control proxy is exposed to the website.

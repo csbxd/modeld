@@ -366,7 +366,7 @@ dependencies = [
 
 [[package]]
 name = "modeld"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "axum",
  "getrandom",
@@ -380,7 +380,7 @@ dependencies = [
 
 [[package]]
 name = "modeld-protocol"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "http",
  "serde",

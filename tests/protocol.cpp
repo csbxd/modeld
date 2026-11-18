@@ -235,6 +235,20 @@ void canceled_open() {
     }
     release = true;
 }
+void browser_open_timeout() {
+    TempFile token(random_id() + random_id());
+    Server server;
+    server.http.Post("/api/v2/browser/sessions", [](const auto &, auto &response) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5200));
+        response.status = 201;
+        response.set_content("{\"created\":true}", "application/json");
+    });
+    server.start();
+    auto settings = config(server.port, token.path);
+    settings.request_timeout_seconds = 10;
+    const auto result = ApiClient(settings).request("POST", "/api/v2/browser/sessions", Json::object());
+    check(result.at("created") == true, "browser session creation uses the configured source probe timeout");
+}
 void redaction() {
     const auto directory = std::filesystem::temp_directory_path() / ("modeld-log-" + random_id());
     const char *prior = std::getenv("XDG_STATE_HOME");
@@ -267,6 +281,7 @@ int main() {
         range();
         cache();
         canceled_open();
+        browser_open_timeout();
         redaction();
         std::cout << "v2 contract, source ranges, cache and cancellation passed\n";
     } catch (const std::exception &e) {

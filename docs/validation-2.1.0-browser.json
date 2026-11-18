@@ -1,0 +1,303 @@
+{
+  "date": "2026-11-18",
+  "version": "2.1.0",
+  "chrome": "156.0.8078.47",
+  "extension_id": "iegbohgbehnfnnnkmgaolhhffinebpdk",
+  "server": "RTX 4080 SUPER / TensorRT-RTX / RIFE 4.26 Heavy FP32",
+  "browser": {
+    "test": "real Bilibili extension playback",
+    "original": {
+      "ui": {
+        "state": "off",
+        "label": "未开启"
+      },
+      "video": {
+        "time": 0,
+        "duration": 16192,
+        "paused": true,
+        "width": 640,
+        "height": 360,
+        "ready": 1,
+        "quality": {
+          "totalVideoFrames": 0,
+          "droppedVideoFrames": 0
+        },
+        "buffer": []
+      },
+      "player": {
+        "time": 0,
+        "duration": 16192,
+        "paused": true
+      }
+    },
+    "started": {
+      "ui": {
+        "state": "on",
+        "label": "60 fps"
+      },
+      "video": {
+        "time": 0.876188,
+        "duration": 16191.366688,
+        "paused": false,
+        "width": 640,
+        "height": 360,
+        "ready": 4,
+        "quality": {
+          "totalVideoFrames": 20,
+          "droppedVideoFrames": 0
+        },
+        "buffer": [
+          [
+            0,
+            3.999999
+          ]
+        ]
+      },
+      "player": {
+        "time": 0.876188,
+        "duration": 16191.366688,
+        "paused": false
+      }
+    },
+    "playing": {
+      "ui": {
+        "state": "on",
+        "label": "60 fps"
+      },
+      "video": {
+        "time": 8.891377,
+        "duration": 16191.366688,
+        "paused": false,
+        "width": 640,
+        "height": 360,
+        "ready": 4,
+        "quality": {
+          "totalVideoFrames": 501,
+          "droppedVideoFrames": 0
+        },
+        "buffer": [
+          [
+            0,
+            19.999999
+          ]
+        ]
+      },
+      "player": {
+        "time": 8.891377,
+        "duration": 16191.366688,
+        "paused": false
+      }
+    },
+    "advance": 8.015189,
+    "decoded_frames": 481,
+    "seek": {
+      "ui": {
+        "state": "on",
+        "label": "60 fps"
+      },
+      "video": {
+        "time": 120,
+        "duration": 16191.366688,
+        "paused": true,
+        "width": 640,
+        "height": 360,
+        "ready": 4,
+        "quality": {
+          "totalVideoFrames": 506,
+          "droppedVideoFrames": 0
+        },
+        "buffer": [
+          [
+            0,
+            19.999999
+          ],
+          [
+            120,
+            121.999999
+          ]
+        ]
+      },
+      "player": {
+        "time": 120,
+        "duration": 16191.366688,
+        "paused": true
+      }
+    },
+    "restored": {
+      "ui": {
+        "state": "off",
+        "label": "未开启"
+      },
+      "video": {
+        "time": 122.065959,
+        "duration": 16192,
+        "paused": false,
+        "width": 853,
+        "height": 480,
+        "ready": 4,
+        "quality": {
+          "totalVideoFrames": 67,
+          "droppedVideoFrames": 0
+        },
+        "buffer": [
+          [
+            120.372471,
+            130.403513
+          ]
+        ]
+      },
+      "player": {
+        "time": 122.065959,
+        "duration": 16192,
+        "paused": false
+      }
+    },
+    "passed": true,
+    "errors": []
+  },
+  "mpv_regression": {
+    "version": "2.0.0",
+    "phase": "media",
+    "backend": "real TensorRT-RTX/CUDA/NVENC",
+    "cases": [
+      {
+        "mode": "combined",
+        "frames": 720,
+        "width": 320,
+        "height": 180,
+        "rate": "60/1",
+        "tracks": [
+          {
+            "id": 1,
+            "kind": "video",
+            "source": "video",
+            "source_index": 0,
+            "codec": "hevc",
+            "language": "",
+            "title": ""
+          },
+          {
+            "id": 1,
+            "kind": "audio",
+            "source": "video",
+            "source_index": 1,
+            "codec": "flac",
+            "language": "",
+            "title": ""
+          },
+          {
+            "id": 1,
+            "kind": "subtitle",
+            "source": "video",
+            "source_index": 2,
+            "codec": "ass",
+            "language": "",
+            "title": ""
+          }
+        ],
+        "retries": [],
+        "audio_packets_identical": true,
+        "audio_samples_identical": true,
+        "trimmed_tail_padding_samples": 0
+      },
+      {
+        "mode": "separate_audio",
+        "frames": 720,
+        "width": 320,
+        "height": 180,
+        "rate": "60/1",
+        "tracks": [
+          {
+            "id": 1,
+            "kind": "video",
+            "source": "video",
+            "source_index": 0,
+            "codec": "hevc",
+            "language": "",
+            "title": ""
+          },
+          {
+            "id": 1,
+            "kind": "audio",
+            "source": "audio",
+            "source_index": 0,
+            "codec": "aac",
+            "language": "und",
+            "title": ""
+          }
+        ],
+        "retries": [],
+        "audio_packets_identical": true,
+        "audio_samples_identical": true,
+        "trimmed_tail_padding_samples": 512
+      },
+      {
+        "mode": "landscape",
+        "frames": 120,
+        "width": 1920,
+        "height": 1080,
+        "rate": "60/1",
+        "tracks": [
+          {
+            "id": 1,
+            "kind": "video",
+            "source": "video",
+            "source_index": 0,
+            "codec": "hevc",
+            "language": "",
+            "title": ""
+          }
+        ],
+        "retries": []
+      },
+      {
+        "mode": "portrait",
+        "frames": 120,
+        "width": 1080,
+        "height": 1920,
+        "rate": "60/1",
+        "tracks": [
+          {
+            "id": 1,
+            "kind": "video",
+            "source": "video",
+            "source_index": 0,
+            "codec": "hevc",
+            "language": "",
+            "title": ""
+          }
+        ],
+        "retries": []
+      }
+    ],
+    "audio_backup_failures_observed": 2,
+    "interrupted_source_recovery": {
+      "backup_reads": 5,
+      "frames": 120
+    },
+    "passed": true
+  },
+  "native_messaging": {
+    "tests": 3,
+    "credential_not_exposed": true,
+    "foreign_media_host_rejected": true,
+    "oversized_input_rejected": true,
+    "large_binary_response_chunked": true
+  },
+  "server_tests": 6,
+  "protocol_tests": 3,
+  "clippy_passed": true,
+  "configuration": {
+    "ui_save_verified": true,
+    "buffer_seconds": 10,
+    "cache_mib": 128,
+    "api_secret_in_native_private_file": true
+  },
+  "notes": [
+    "Actual Bilibili page, original video element and original controls are used.",
+    "Browser output is H.264/AAC fragmented MP4; mpv remains HEVC/Matroska by default.",
+    "The native site may resume its adaptive quality choice after restoration.",
+    "The browser test uses a separate Chrome profile and developer mode; installation into the normal browser is audited separately."
+  ],
+  "passed": true
+}

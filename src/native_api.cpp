@@ -47,6 +47,7 @@ struct NativeStream {
     std::shared_ptr<std::atomic<bool>> canceled;
     std::unique_ptr<modeld::MediaStream> media;
     std::string description;
+    std::string content_type;
 };
 struct CancelToken {
     std::shared_ptr<std::atomic<bool>> value = std::make_shared<std::atomic<bool>>(false);
@@ -97,10 +98,11 @@ void *modeld_stream_open(void *context, const char *request_json, const char *se
         const auto request = modeld::Json::parse(request_json);
         const auto config = modeld::Json::parse(settings_json);
         modeld::require_keys(request, {"model", "video", "audio", "tracks"});
-        modeld::require_keys(config,
-                             {"segment_seconds", "encoder", "qp", "source_timeout_seconds"});
+        modeld::require_keys(config, {"segment_seconds", "encoder", "qp", "source_timeout_seconds",
+                                      "fragmented_mp4"});
         modeld::RenderSettings settings{config.at("segment_seconds"), config.at("qp"),
-                                        config.at("source_timeout_seconds"), config.at("encoder")};
+                                        config.at("source_timeout_seconds"), config.at("encoder"),
+                                        config.at("fragmented_mp4")};
         auto video = modeld::Input::parse(request.at("video"));
         std::optional<modeld::Input> audio;
         if (request.contains("audio") && !request.at("audio").is_null())
@@ -115,6 +117,7 @@ void *modeld_stream_open(void *context, const char *request_json, const char *se
             stream->canceled);
         stream->description = stream->media->description().dump(
             -1, ' ', false, modeld::Json::error_handler_t::replace);
+        stream->content_type = stream->media->content_type();
         return stream.release();
     } catch (...) {
         record_error();
@@ -123,6 +126,9 @@ void *modeld_stream_open(void *context, const char *request_json, const char *se
 }
 const char *modeld_stream_description(void *stream) {
     return static_cast<NativeStream *>(stream)->description.c_str();
+}
+const char *modeld_stream_content_type(void *stream) {
+    return static_cast<NativeStream *>(stream)->content_type.c_str();
 }
 int modeld_stream_init(void *stream, ModeldSegment *out) {
     try {

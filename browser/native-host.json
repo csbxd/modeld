@@ -1,0 +1,9 @@
+{
+  "name": "org.csbxd.modeld.browser",
+  "description": "modeld browser interpolation",
+  "path": "/usr/bin/modeld-browser-host",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://iegbohgbehnfnnnkmgaolhhffinebpdk/"
+  ]
+}

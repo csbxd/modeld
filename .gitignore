@@ -5,3 +5,6 @@
 /config/server.json
 /config/client.json
 .env
+
+*.crx
+*.pem

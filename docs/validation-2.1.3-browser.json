@@ -1,0 +1,36 @@
+{
+  "version": "2.1.3",
+  "date": "2026-11-19",
+  "test": "Actual Chrome settings form and native config-save with isolated test configuration",
+  "cases": [
+    {
+      "forward": 3600,
+      "back": 86400,
+      "htmlValid": true,
+      "savedForward": 3600,
+      "savedBack": 86400
+    },
+    {
+      "forward": 31536000,
+      "back": 31536000,
+      "htmlValid": true,
+      "savedForward": 31536000,
+      "savedBack": 31536000
+    },
+    {
+      "forward": 4,
+      "back": 0,
+      "htmlValid": true,
+      "savedForward": 4,
+      "savedBack": 0
+    }
+  ],
+  "passed": true,
+  "tests": {
+    "ctest": "1/1 passed",
+    "javascript": "21/21 passed",
+    "quotaRetry": true,
+    "evictedSegmentReload": true,
+    "evictedTailEof": true
+  }
+}

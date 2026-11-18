@@ -4,7 +4,7 @@ import {setImmediate} from 'node:timers/promises';
 import {test} from 'node:test';
 import vm from 'node:vm';
 
-function playback({toolbarHeight = 35} = {}) {
+function playback({toolbarHeight = 35, bufferSeconds = 12, backSeconds = 60, mediaDuration = 6} = {}) {
   const requests = [], intervals = new Map();
   const attributes = new Set();
   const state = {fullscreen: false, ranges: [], ends: 0, reopens: 0, bottom: 600, opens: 0, restores: 0};
@@ -66,6 +66,7 @@ function playback({toolbarHeight = 35} = {}) {
       const buffer = Object.assign(new EventTarget(), {
         updating: false,
         appendBuffer(data) {
+          if (data[0] === state.quotaIndex + 1) throw new DOMException('Media buffer is full', 'QuotaExceededError');
           state.source.readyState = 'open';
           buffer.updating = true;
           queueMicrotask(() => {
@@ -95,7 +96,7 @@ function playback({toolbarHeight = 35} = {}) {
     createElement: () => root,
     querySelector: selector => selector.includes('video') ? video : state.missing ? null : container
   });
-  const preferences = {bufferSeconds: 12, backSeconds: 60};
+  const preferences = {bufferSeconds, backSeconds};
   const reply = value => ({ok: true, value});
   const chrome = {runtime: {
     onMessage: {addListener() {}},
@@ -105,7 +106,7 @@ function playback({toolbarHeight = 35} = {}) {
         case 'session.open':
           state.opens++;
           return reply({preferences, created: {
-            mime_type: 'video/mp4', manifest: {media: {duration_seconds: 6, segment_seconds: 2, segment_count: 3}}
+            mime_type: 'video/mp4', manifest: {media: {duration_seconds: mediaDuration, segment_seconds: 2, segment_count: Math.ceil(mediaDuration / 2)}}
           }});
         case 'session.stop': await state.holdClose; return reply(null);
         case 'session.pause': return state.failLease ? {ok: false, error: 'Temporary lease failure'} : reply(null);
@@ -239,4 +240,50 @@ test('a temporary lease update failure keeps a playable media session active', a
   await p.flush();
   assert.equal(p.root.dataset.state, 'on');
   assert.equal(p.state.restores, 0);
+});
+
+test('a full browser media buffer waits for room and retries without restoring the original source', async () => {
+  const p = playback({bufferSeconds: 86400, backSeconds: 86400});
+  p.state.quotaIndex = 2;
+  p.toggle.dispatchEvent(new Event('click'));
+  await p.flush();
+  assert.equal(p.root.dataset.state, 'on');
+  assert.equal(p.state.restores, 0);
+  assert.deepEqual(p.requests, [0, 1, 2]);
+  p.state.quotaIndex = undefined;
+  await p.intervals.get(300)();
+  await p.flush();
+  assert.deepEqual(p.requests, [0, 1, 2, 2]);
+  assert.equal(p.state.source.readyState, 'ended');
+});
+
+test('automatically evicted future segments are fetched again without a seek', async () => {
+  const p = playback();
+  p.toggle.dispatchEvent(new Event('click'));
+  await p.flush();
+  p.state.ranges = [[0, 4]];
+  p.video.currentTime = 3;
+  await p.intervals.get(300)();
+  await p.flush();
+  assert.deepEqual(p.requests, [0, 1, 2, 2]);
+  assert.equal(p.state.source.readyState, 'ended');
+});
+
+test('an evicted tail is appended again before signalling end of stream', async () => {
+  const p = playback({bufferSeconds: 86400, mediaDuration: 10});
+  p.toggle.dispatchEvent(new Event('click'));
+  await p.flush();
+  await p.intervals.get(300)();
+  await p.flush();
+  assert.equal(p.state.ends, 1);
+  p.state.ranges = [[0, 4]];
+  p.video.currentTime = 2;
+  await p.intervals.get(300)();
+  await p.flush();
+  assert.equal(p.state.source.readyState, 'open');
+  assert.equal(p.state.ends, 1);
+  await p.intervals.get(300)();
+  await p.flush();
+  assert.equal(p.state.source.readyState, 'ended');
+  assert.equal(p.state.ends, 2);
 });

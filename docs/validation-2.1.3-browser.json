@@ -32,5 +32,19 @@
     "quotaRetry": true,
     "evictedSegmentReload": true,
     "evictedTailEof": true
+  },
+  "installation": {
+    "package": "www-plugins/modeld-browser-2.1.3::gentoo-cs",
+    "chrome": {
+      "version": "2.1.3",
+      "id": "iegbohgbehnfnnnkmgaolhhffinebpdk"
+    },
+    "form": {
+      "forwardMax": null,
+      "backMax": null
+    },
+    "signedSourcesMatch": true,
+    "crxSha256": "0784775302a55c176e5f098cceac92697f0b81c6c0eaff5fd00b4d3559aad63d",
+    "gentooTestsPassed": true
   }
 }

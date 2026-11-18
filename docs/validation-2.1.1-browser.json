@@ -1,0 +1,296 @@
+{
+  "version": "2.1.1",
+  "date": "2026-11-18",
+  "browser": "Google Chrome 156.0.8078.47 arm64",
+  "method": "Real Bilibili page, unpacked extension, installed native host and private modeld 2.1.0 API on the production GPU",
+  "baseline": {
+    "time": 258.17603,
+    "duration": 258.252334,
+    "ended": false,
+    "automatic_backward_seeks": 26,
+    "tail_seeks": [
+      {
+        "from": 258.169368,
+        "to": 257.6333125
+      },
+      {
+        "from": 258.171428,
+        "to": 257.6333125
+      },
+      {
+        "from": 258.172966,
+        "to": 257.6333125
+      }
+    ]
+  },
+  "video": "BV137sU6pEcr",
+  "samples": [
+    {
+      "state": "on",
+      "label": "60 fps",
+      "time": 252.944124,
+      "duration": 258.23475,
+      "ended": false,
+      "paused": false,
+      "ready": 4,
+      "frames": 62,
+      "buffer": [
+        [
+          252,
+          255.999999
+        ]
+      ]
+    },
+    {
+      "state": "on",
+      "label": "60 fps",
+      "time": 253.953316,
+      "duration": 258.252334,
+      "ended": false,
+      "paused": false,
+      "ready": 4,
+      "frames": 123,
+      "buffer": [
+        [
+          252,
+          258.252334
+        ]
+      ]
+    },
+    {
+      "state": "on",
+      "label": "60 fps",
+      "time": 254.953738,
+      "duration": 258.252334,
+      "ended": false,
+      "paused": false,
+      "ready": 4,
+      "frames": 183,
+      "buffer": [
+        [
+          252,
+          258.252334
+        ]
+      ]
+    },
+    {
+      "state": "on",
+      "label": "60 fps",
+      "time": 255.954773,
+      "duration": 258.252334,
+      "ended": false,
+      "paused": false,
+      "ready": 4,
+      "frames": 244,
+      "buffer": [
+        [
+          252,
+          258.252334
+        ]
+      ]
+    },
+    {
+      "state": "on",
+      "label": "60 fps",
+      "time": 256.96134,
+      "duration": 258.252334,
+      "ended": false,
+      "paused": false,
+      "ready": 4,
+      "frames": 304,
+      "buffer": [
+        [
+          252,
+          258.252334
+        ]
+      ]
+    },
+    {
+      "state": "on",
+      "label": "60 fps",
+      "time": 257.965995,
+      "duration": 258.252334,
+      "ended": false,
+      "paused": false,
+      "ready": 4,
+      "frames": 364,
+      "buffer": [
+        [
+          252,
+          258.252334
+        ]
+      ]
+    },
+    {
+      "state": "on",
+      "label": "60 fps",
+      "time": 258.252334,
+      "duration": 258.252334,
+      "ended": true,
+      "paused": true,
+      "ready": 4,
+      "frames": 375,
+      "buffer": [
+        [
+          252,
+          258.252334
+        ]
+      ]
+    }
+  ],
+  "original": {
+    "state": "off",
+    "label": "未开启",
+    "time": 0.006403,
+    "duration": 259,
+    "ended": false,
+    "paused": false,
+    "ready": 4,
+    "frames": 4,
+    "buffer": [
+      [
+        0,
+        4.999999
+      ]
+    ]
+  },
+  "ended": {
+    "state": "on",
+    "label": "60 fps",
+    "time": 258.252334,
+    "duration": 258.252334,
+    "ended": true,
+    "paused": true,
+    "ready": 4,
+    "frames": 375,
+    "buffer": [
+      [
+        252,
+        258.252334
+      ]
+    ]
+  },
+  "stableEnd": {
+    "state": "on",
+    "label": "60 fps",
+    "time": 258.252334,
+    "duration": 258.252334,
+    "ended": true,
+    "paused": true,
+    "ready": 4,
+    "frames": 375,
+    "buffer": [
+      [
+        252,
+        258.252334
+      ]
+    ]
+  },
+  "replayed": {
+    "state": "on",
+    "label": "60 fps",
+    "time": 21.10878,
+    "duration": 258.252334,
+    "ended": false,
+    "paused": false,
+    "ready": 4,
+    "frames": 447,
+    "buffer": [
+      [
+        20,
+        27.999999
+      ],
+      [
+        252,
+        258.252334
+      ]
+    ]
+  },
+  "continued": {
+    "state": "on",
+    "label": "60 fps",
+    "time": 25.121919,
+    "duration": 258.252334,
+    "ended": false,
+    "paused": false,
+    "ready": 4,
+    "frames": 688,
+    "buffer": [
+      [
+        20,
+        35.999999
+      ],
+      [
+        252,
+        258.252334
+      ]
+    ]
+  },
+  "normal": {
+    "widget": {
+      "x": 41,
+      "y": 756,
+      "right": 185.5,
+      "bottom": 790.796875,
+      "width": 144.5,
+      "height": 34.796875
+    },
+    "video": {
+      "x": 41,
+      "y": 168,
+      "right": 1004,
+      "bottom": 710,
+      "width": 963,
+      "height": 542
+    },
+    "parent": "left-container",
+    "controls": false,
+    "fullscreen": false,
+    "overlap": 0
+  },
+  "fullscreen": {
+    "widget": {
+      "x": 343.5,
+      "y": 565,
+      "right": 476,
+      "bottom": 600,
+      "width": 132.5,
+      "height": 35
+    },
+    "video": {
+      "x": 0,
+      "y": 0,
+      "right": 800,
+      "bottom": 600,
+      "width": 800,
+      "height": 600
+    },
+    "parent": "bpx-player-control-bottom-right",
+    "controls": true,
+    "fullscreen": true,
+    "overlap": 4637.5
+  },
+  "returned": {
+    "widget": {
+      "x": 41,
+      "y": 756,
+      "right": 185.5,
+      "bottom": 790.796875,
+      "width": 144.5,
+      "height": 34.796875
+    },
+    "video": {
+      "x": 41,
+      "y": 168,
+      "right": 1004,
+      "bottom": 710,
+      "width": 963,
+      "height": 542
+    },
+    "parent": "left-container",
+    "controls": false,
+    "fullscreen": false,
+    "overlap": 0
+  },
+  "passed": true
+}

@@ -55,7 +55,10 @@
     const replacements={
       play:()=>v.play(),pause:()=>v.pause(),isPaused:()=>v.paused,isSeeking:()=>v.seeking,
       time:()=>v.currentTime,duration:()=>Number.isFinite(v.duration)?v.duration:duration,
-      seek:t=>{v.currentTime=Math.max(0,Math.min(duration,Number(t)));},
+      seek:t=>{
+        v.dispatchEvent(new Event('modeld.before-seek'));
+        v.currentTime=Math.max(0,Math.min(duration,Number(t)));
+      },
       getVideoElement:()=>v,getBufferLength:ahead,isReady:()=>true,isDynamic:()=>false,
       setQualityFor:(...args)=>{restore().then(()=>{original.setQualityFor(...args);window.dispatchEvent(new Event('modeld.native-source-change'));});},
       setVolume:n=>{v.volume=n;},getVolume:()=>v.volume,setMute:n=>{v.muted=n;},isMuted:()=>v.muted,

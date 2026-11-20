@@ -1,5 +1,6 @@
 #include "modeld/media.hpp"
 #include "modeld/core.hpp"
+#include "modeld/fmp4.hpp"
 #include <cuda.h>
 #include <cuda_runtime_api.h>
 extern "C" {
@@ -710,7 +711,11 @@ struct MediaStream::Impl {
         avcheck(result, "Write segment header");
         avio_flush(mux.io);
         mux.first_dts.assign(mux.format->nb_streams, AV_NOPTS_VALUE);
-        if (!fragmented_mp4) {
+        if (fragmented_mp4) {
+            // Browsers select the recorded-stream decode path from the MP4
+            // initialization data before MediaSource.duration is applied.
+            write_fmp4_recording_duration(mux.bytes, info.duration);
+        } else {
             // An empty, finite Cluster lets mpv probe the init fragment without
             // reporting a truncated Matroska file. Subsequent clusters follow
             // normally, with their original absolute timestamps.

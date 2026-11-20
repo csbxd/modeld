@@ -104,7 +104,14 @@ Successful segment headers include `X-Modeld-Frames` and `X-Modeld-Render-Second
 
 `GET /api/v2/browser/capabilities` and `POST /api/v2/browser/sessions` require the control Bearer token.
 
-The browser create body contains `model`, `video`, optional `audio` and optional integer `qp` (0–40). Inputs use the same validated URL-list/header contract. The browser profile always selects H.264 High 4.2 with fragmented MP4 and at most one copied AAC-LC track. Embedded subtitles/attachments are omitted; the website retains its own subtitle rendering. Normal session requests keep their existing Matroska/default-encoder behavior.
+The browser create body contains `model`, `video`, optional `audio`, optional `video_codec` and optional integer `qp`. The capabilities response lists accepted codec identifiers in `video_codecs`. The existing `video_codec`, `qp_min` and `qp_max` capability fields describe the default H.264 profile.
+
+| `video_codec` | Video profile | QP range | Default QP |
+| --- | --- | --- | --- |
+| `h264` (default) | H.264 High 4.2 | 0–40 | Server output QP |
+| `av1` | AV1 Main 4.1, 8-bit | 0–255 | 36 |
+
+Inputs use the same validated URL-list/header contract. Both codecs use fragmented MP4 and at most one copied AAC-LC track. AV1 requires an AV1-capable NVENC GPU and a browser that can decode AV1 through MediaSource. Subtitles and overlays are rendered by the website. Normal session requests use the server's Matroska profile.
 
 The response has the normal `id`, `lease_seconds` and `manifest`, plus `mime_type` for MediaSource. The browser profile uses the existing capability media routes and the standard lease/close lifecycle. Every fragment contains absolute tfdt timestamps, so clients append at their actual source timeline positions. The browser transport requires nonnegative source packet decode times.
 

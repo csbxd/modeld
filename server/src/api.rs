@@ -1,5 +1,5 @@
 use crate::{
-    config::Config,
+    config::{BrowserCodec, Config},
     engine::Engine,
     error::{ApiError, Result},
     native::Cancellation,
@@ -108,13 +108,12 @@ async fn create(
     State(app): State<Arc<App>>,
     request: std::result::Result<Json<CreateSession>, JsonRejection>,
 ) -> Result<(StatusCode, Json<SessionCreated>)> {
-    open_session(app, body(request)?, false, None).await
+    open_session(app, body(request)?, None).await
 }
 async fn open_session(
     app: Arc<App>,
     request: CreateSession,
-    browser: bool,
-    qp: Option<u32>,
+    browser: Option<(BrowserCodec, Option<u32>)>,
 ) -> Result<(StatusCode, Json<SessionCreated>)> {
     if request.model != MODEL {
         return Err(ApiError::new(404, "unknown_model", "Unknown model"));
@@ -131,10 +130,9 @@ async fn open_session(
     let mut guard = Probe(Some(cancellation.clone()));
     let engine = app.engine.clone();
     let mut config = app.config.clone();
-    if browser {
-        config.output.codec = crate::config::Codec::H264;
-        config.output.browser = true;
-        config.output.qp = qp.unwrap_or(config.output.qp);
+    if let Some((codec, qp)) = browser {
+        config.output.browser = Some(codec);
+        config.output.qp = qp.unwrap_or_else(|| codec.default_qp(config.output.qp));
     }
     let timeout = config.limits.source_timeout_seconds as u64 + 2;
     let started = Instant::now();
@@ -173,11 +171,14 @@ struct BrowserRequest {
     audio: Option<Input>,
     #[serde(default)]
     qp: Option<u32>,
+    #[serde(default)]
+    video_codec: BrowserCodec,
 }
 async fn browser_capabilities() -> Json<serde_json::Value> {
     Json(
         serde_json::json!({"schema":1,"model":MODEL,"output_fps":60,"container":"fragmented_mp4",
-        "video_codec":"h264","audio_codec":"aac_lc","precision":"fp32","qp_min":0,"qp_max":40}),
+        "video_codec":"h264","video_codecs":BrowserCodec::ALL,"audio_codec":"aac_lc","precision":"fp32",
+        "qp_min":0,"qp_max":BrowserCodec::H264.max_qp()}),
     )
 }
 async fn browser_create(
@@ -185,8 +186,11 @@ async fn browser_create(
     request: std::result::Result<Json<BrowserRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<serde_json::Value>)> {
     let request = body(request)?;
-    if request.qp.is_some_and(|qp| qp > 40) {
-        return Err(ApiError::invalid("QP must be between 0 and 40"));
+    let max_qp = request.video_codec.max_qp();
+    if request.qp.is_some_and(|qp| qp > max_qp) {
+        return Err(ApiError::invalid(format!(
+            "QP must be between 0 and {max_qp}"
+        )));
     }
     let source = CreateSession {
         model: request.model,
@@ -197,7 +201,8 @@ async fn browser_create(
             subtitles: false,
         },
     };
-    let (code, Json(created)) = open_session(app.clone(), source, true, request.qp).await?;
+    let (code, Json(created)) =
+        open_session(app.clone(), source, Some((request.video_codec, request.qp))).await?;
     let stream = app.sessions.get(&created.id)?;
     let mut value = serde_json::to_value(&created)
         .map_err(|_| ApiError::new(500, "invalid_response", "Cannot encode session"))?;

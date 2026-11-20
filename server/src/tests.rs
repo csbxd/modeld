@@ -1,6 +1,6 @@
 use crate::{
     api::{self, App},
-    config::Config,
+    config::{BrowserCodec, Config},
     engine::{Engine, Segment, Stream},
     error::{ApiError, Result},
     native::Cancellation,
@@ -44,7 +44,7 @@ struct Fake {
     gate: Option<Arc<Gate>>,
 }
 struct FakeStream {
-    browser: bool,
+    browser: Option<BrowserCodec>,
     media: Media,
     calls: Arc<Mutex<BTreeMap<u64, usize>>>,
     canceled: Arc<AtomicUsize>,
@@ -87,10 +87,10 @@ impl Engine for Fake {
 }
 impl Stream for FakeStream {
     fn content_type(&self) -> &str {
-        if self.browser {
-            "video/mp4; codecs=\"avc1.64002A,mp4a.40.2\""
-        } else {
-            "video/x-matroska"
+        match self.browser {
+            Some(BrowserCodec::H264) => "video/mp4; codecs=\"avc1.64002A,mp4a.40.2\"",
+            Some(BrowserCodec::Av1) => "video/mp4; codecs=\"av01.0.09M.08,mp4a.40.2\"",
+            None => "video/x-matroska",
         }
     }
     fn media(&self) -> &Media {
@@ -426,48 +426,57 @@ async fn browser_profile_has_its_own_authenticated_contract() {
     )
     .await;
     assert_eq!(capabilities["video_codec"], "h264");
-    let mut request = body();
-    request["qp"] = 41.into();
-    assert_eq!(
-        json_request(
+    assert_eq!(capabilities["video_codecs"], json!(["h264", "av1"]));
+    for (codec, qp) in [("h264", 41), ("av1", 256), ("hevc", 18)] {
+        let mut request = body();
+        request["video_codec"] = codec.into();
+        request["qp"] = qp.into();
+        assert_eq!(
+            json_request(
+                router.clone(),
+                "POST",
+                "/api/v2/browser/sessions",
+                Some(request),
+                true,
+            )
+            .await
+            .0,
+            422
+        );
+    }
+    let mut av1 = body();
+    av1["video_codec"] = "av1".into();
+    av1["qp"] = 45.into();
+    for (request, mime) in [
+        (body(), "video/mp4; codecs=\"avc1.64002A,mp4a.40.2\""),
+        (av1, "video/mp4; codecs=\"av01.0.09M.08,mp4a.40.2\""),
+    ] {
+        let (status, created) = json_request(
             router.clone(),
             "POST",
             "/api/v2/browser/sessions",
             Some(request),
-            true
+            true,
         )
-        .await
-        .0,
-        422
-    );
-    let (status, created) = json_request(
-        router.clone(),
-        "POST",
-        "/api/v2/browser/sessions",
-        Some(body()),
-        true,
-    )
-    .await;
-    assert_eq!(status, 201);
-    assert!(created["mime_type"]
-        .as_str()
-        .unwrap()
-        .starts_with("video/mp4"));
-    let id = created["id"].as_str().unwrap();
-    assert_eq!(
-        json_request(
-            router,
-            "DELETE",
-            &format!("/api/v2/sessions/{id}"),
-            None,
-            true
-        )
-        .await
-        .0,
-        204
-    );
+        .await;
+        assert_eq!(status, 201);
+        assert_eq!(created["mime_type"], mime);
+        let id = created["id"].as_str().unwrap();
+        assert_eq!(
+            json_request(
+                router.clone(),
+                "DELETE",
+                &format!("/api/v2/sessions/{id}"),
+                None,
+                true,
+            )
+            .await
+            .0,
+            204
+        );
+    }
     assert!(
-        !app.config.output.browser,
+        app.config.output.browser.is_none(),
         "a browser request cannot change the mpv default"
     );
 }

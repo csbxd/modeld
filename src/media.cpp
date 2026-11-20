@@ -644,9 +644,14 @@ struct MediaStream::Impl {
         av_dict_set(&options, "forced-idr", "1", 0);
         av_dict_set(&options, "delay", "0", 0);
         av_dict_set(&options, "rc-lookahead", "0", 0);
-        if (fragmented_mp4) {
+        if (fragmented_mp4 && codec->id == AV_CODEC_ID_H264) {
             av_dict_set(&options, "profile", "high", 0);
             av_dict_set(&options, "level", "4.2", 0);
+        }
+        if (fragmented_mp4 && codec->id == AV_CODEC_ID_AV1) {
+            // NV12 selects Main profile, 8-bit. Keep the level stable when seeking.
+            av_dict_set(&options, "level", "4.1", 0);
+            av_dict_set_int(&options, "tier", 0, 0);
         }
         int r = avcodec_open2(encoder, codec, &options);
         av_dict_free(&options);
@@ -781,8 +786,9 @@ MediaStream::MediaStream(Input video, std::optional<Input> audio, TrackSelection
         }
     }
     if (v.fragmented_mp4) {
-        if (tracks.subtitles || settings.encoder != "h264_nvenc")
-            throw Error(422, "Browser output requires H.264 without embedded subtitles");
+        if (tracks.subtitles ||
+            (settings.encoder != "h264_nvenc" && settings.encoder != "av1_nvenc"))
+            throw Error(422, "Browser output requires H.264 or AV1 without embedded subtitles");
         int audio_tracks = 0;
         for (const auto &track : v.copy_tracks) {
             if (track->parameters->codec_type != AVMEDIA_TYPE_AUDIO ||
@@ -846,7 +852,8 @@ std::vector<uint8_t> MediaStream::initialization() const {
 std::string MediaStream::content_type() const {
     if (!impl->fragmented_mp4)
         return "video/x-matroska";
-    return std::string("video/mp4; codecs=\"avc1.64002A") +
+    const char *video_codec = impl->encoder_name == "av1_nvenc" ? "av01.0.09M.08" : "avc1.64002A";
+    return std::string("video/mp4; codecs=\"") + video_codec +
            (impl->copy_tracks.empty() ? "" : ",mp4a.40.2") + "\"";
 }
 Segment MediaStream::render(int64_t sequence) {

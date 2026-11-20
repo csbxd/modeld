@@ -78,10 +78,13 @@ async function route(message,sender){
     const state={cache:new Map(),cacheBytes:0,clock:0,paused:true,error:null};tabs.set(tabId,state);
     const local=await chrome.storage.local.get('preferences'),pref=preferences(local.preferences);
     const source=await page(tabId,'probe');
+    const output={
+      video_codec:pref.videoCodec,qp:pref.videoCodec==='av1'?pref.av1Qp:pref.qp
+    };
     let created;const deadline=Date.now()+45000;
     for(;;){
       if(tabs.get(tabId)!==state)throw Error('已取消插帧');
-      try{created=await native('open',{video:source.video,audio:source.audio,user_agent:source.user_agent,qp:pref.qp});break;}
+      try{created=await native('open',{video:source.video,audio:source.audio,user_agent:source.user_agent,...output});break;}
       catch(error){if(error.code!=='session_limit'||!error.retryable||Date.now()>=deadline)throw error;await new Promise(resolve=>setTimeout(resolve,250));}
     }
     if(tabs.get(tabId)!==state){await native('close',{session:created.id});throw Error('已取消插帧');}

@@ -28,7 +28,8 @@
     button.classList.toggle('active',phase==='on'||phase==='buffering');
     button.disabled=!!closing;
     button.textContent=closing?'恢复原流':starting?'取消准备':phase==='on'||phase==='buffering'?'关闭插帧':'插帧 60 FPS';
-    label.textContent=error||({off:'未开启',opening:'准备中',closing:'恢复原流中',on:'60 fps',buffering:'缓冲中'}[phase]||phase);
+    const playing=player?.preferences.videoCodec==='av1'?'AV1 · 60 fps':'60 fps';
+    label.textContent=error||({off:'未开启',opening:'准备中',closing:'恢复原流中',on:playing,buffering:'缓冲中'}[phase]||phase);
     label.classList.toggle('error',!!error);label.title=error;
     root.dataset.state=phase;
   }
@@ -117,7 +118,12 @@
       }));
     }
     async begin(){
-      if(!MediaSource.isTypeSupported(this.created.mime_type))throw Error('这台浏览器不能解码插帧输出');
+      if(!MediaSource.isTypeSupported(this.created.mime_type)){
+        const message=this.preferences.videoCodec==='av1'
+          ?'这台浏览器不能播放 AV1 插帧，请在扩展设置中选择 H.264'
+          :'这台浏览器不能解码插帧输出';
+        throw Error(message);
+      }
       const opened=new Promise(resolve=>this.source.addEventListener('sourceopen',resolve,{once:true}));
       const saved=await call('page.takeover',{value:{url:this.url,duration:this.media.duration_seconds}});
       await opened;if(!this.running)return;

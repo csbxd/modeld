@@ -1,5 +1,5 @@
 use crate::error::{ApiError, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf};
 
 #[derive(Clone, Deserialize)]
@@ -46,7 +46,7 @@ pub struct Output {
     pub codec: Codec,
     pub qp: u32,
     #[serde(skip)]
-    pub browser: bool,
+    pub browser: Option<BrowserCodec>,
 }
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -62,13 +62,52 @@ impl Codec {
         }
     }
 }
+#[derive(Clone, Copy, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserCodec {
+    #[default]
+    H264,
+    Av1,
+}
+impl BrowserCodec {
+    pub const ALL: [Self; 2] = [Self::H264, Self::Av1];
+
+    pub fn encoder(self) -> &'static str {
+        match self {
+            Self::H264 => Codec::H264.encoder(),
+            Self::Av1 => "av1_nvenc",
+        }
+    }
+
+    pub fn max_qp(self) -> u32 {
+        match self {
+            Self::H264 => 40,
+            Self::Av1 => 255,
+        }
+    }
+
+    pub fn default_qp(self, h264_qp: u32) -> u32 {
+        match self {
+            Self::H264 => h264_qp,
+            Self::Av1 => 36,
+        }
+    }
+}
+impl Output {
+    pub fn encoder(&self) -> &'static str {
+        match self.browser {
+            Some(codec) => codec.encoder(),
+            None => self.codec.encoder(),
+        }
+    }
+}
 impl Default for Output {
     fn default() -> Self {
         Self {
             segment_seconds: 2,
             codec: Codec::Hevc,
             qp: 18,
-            browser: false,
+            browser: None,
         }
     }
 }

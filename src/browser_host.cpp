@@ -163,16 +163,31 @@ struct Host {
         if (action == "open") {
             const auto c = load();
             ApiClient api(c);
+            const auto video_codec = message.value("video_codec", std::string("h264"));
+            if (video_codec != "h264" && video_codec != "av1")
+                throw Error(422, "Unsupported browser output codec");
             const auto user_agent = message.value("user_agent", std::string("Mozilla/5.0"));
             if (user_agent.size() > 1024 || user_agent.find_first_of("\r\n") != std::string::npos)
                 throw Error(422, "Invalid browser user agent");
             const Json headers = {{"Referer", "https://www.bilibili.com/"},
                                   {"User-Agent", user_agent}};
             Json body = {{"model", model_id},
-                         {"video", {{"urls", sources(message.at("video"))}, {"headers", headers}}},
-                         {"qp", message.value("qp", 18)}};
+                         {"video", {{"urls", sources(message.at("video"))}, {"headers", headers}}}};
             if (message.contains("audio") && !message["audio"].is_null())
                 body["audio"] = {{"urls", sources(message["audio"])}, {"headers", headers}};
+            if (message.contains("qp"))
+                body["qp"] = message.at("qp");
+            else if (video_codec == "h264")
+                body["qp"] = 18;
+            if (video_codec == "av1") {
+                const auto capabilities =
+                    api.request("GET", "/api/v2/browser/capabilities", nullptr, stop);
+                const auto codecs = capabilities.value("video_codecs", Json::array());
+                if (std::find(codecs.begin(), codecs.end(), "av1") == codecs.end())
+                    throw Error(422, "远端 modeld 未提供 AV1，请升级服务端或选择 H.264。",
+                                "unsupported_media");
+                body["video_codec"] = video_codec;
+            }
             auto created = api.request("POST", "/api/v2/browser/sessions", body, stop);
             auto normal = created;
             normal.erase("mime_type");

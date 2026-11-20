@@ -6,7 +6,10 @@ async function load(){
     const value=await send('config.get');
     $('endpoint').value=value.service.endpoint;$('connect').value=value.service.connect_address;
     $('auto').checked=value.preferences.autoEnable;$('buffer').value=value.preferences.bufferSeconds;
-    $('back').value=value.preferences.backSeconds;$('cache').value=value.preferences.cacheMiB;$('qp').value=value.preferences.qp;
+    $('back').value=value.preferences.backSeconds;$('cache').value=value.preferences.cacheMiB;
+    $('codec').value=value.preferences.videoCodec;
+    $('qp').value=value.preferences.qp;
+    $('av1-qp').value=value.preferences.av1Qp;
     result('connection',value.service.configured?'本机配置已就绪':'填写服务地址和密钥后保存');
   }catch(error){result('connection','本机组件未连接：'+error.message,true);}
 }
@@ -14,13 +17,21 @@ $('settings').addEventListener('submit',async event=>{
   event.preventDefault();
   try{
     await send('config.save',{service:{endpoint:$('endpoint').value.trim(),connect_address:$('connect').value.trim(),token:$('token').value.trim()},
-      preferences:{autoEnable:$('auto').checked,bufferSeconds:Number($('buffer').value),backSeconds:Number($('back').value),cacheMiB:Number($('cache').value),qp:Number($('qp').value)}});
+      preferences:{
+        autoEnable:$('auto').checked,bufferSeconds:Number($('buffer').value),
+        backSeconds:Number($('back').value),cacheMiB:Number($('cache').value),
+        videoCodec:$('codec').value,qp:Number($('qp').value),av1Qp:Number($('av1-qp').value)
+      }});
     $('token').value='';result('result','已保存，下次开启插帧时生效');
   }catch(error){result('result',error.message,true);}
 });
 $('test').addEventListener('click',async()=>{
   result('connection','正在连接…');
-  try{const value=await send('service.test');result('connection','已连接 modeld '+value.version+' · RIFE FP32 · 60 fps');}
+  try{
+    const value=await send('service.test');
+    const codecs=value.browser.video_codecs?.includes('av1')?'H.264 / AV1':'H.264';
+    result('connection','已连接 modeld '+value.version+' · '+codecs+' · 60 fps');
+  }
   catch(error){result('connection',error.message,true);}
 });
 load();

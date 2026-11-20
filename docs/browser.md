@@ -8,7 +8,7 @@ Chrome Manifest V3 扩展，在 B 站原播放器里使用远端 RIFE 4.26 Heavy
 
 密钥由本机 native messaging 程序读取，不放入网页或扩展消息中的媒体地址。播放偏好保存在 Chrome 本机存储。默认手动开启，二维日漫保持关闭；自动开启需自行确认片源类型。
 
-支持当前 modeld 的 SDR、原生 1080p 范围、低于 60 fps 的输入。浏览器输出为 H.264 High 4.2、60 fps 与原 AAC-LC 音轨，视频只编码一次，音轨不重新编码。网页字幕与弹幕仍由 B 站绘制。QP 越低，编码画质与带宽通常越高。
+支持当前 modeld 的 SDR、原生 1080p 范围、低于 60 fps 的输入。设置页可选择 H.264 或 AV1。AV1 需要 modeld 2.1.4 或更新版本、支持 AV1 编码的 NVENC 显卡和支持 AV1 MediaSource 播放的浏览器。两种编码均输出 60 fps 分片 MP4 与原 AAC-LC 音轨，分别保存 QP。H.264 默认 QP 18，AV1 默认 QP 36，数值越低时画质和码率通常越高。保存后重新开启插帧即可使用所选编码。
 
 开启前检查实际选中的音轨。当前浏览器传输支持标准 AAC-LC；选中 Dolby 或 Hi-Res 音轨时，页面会提示切换音质，由用户选择后再开启插帧。
 
@@ -31,7 +31,7 @@ emerge --ask www-plugins/modeld-browser::gentoo-cs
 - 扩展从当前 B 站播放器读取实际选中的视频、AAC 音轨和官方备用 URL，保留完整文件名及签名。
 - Chrome service worker 通过 native messaging 与 C++ 本机组件通信；因此 HTTPS 网页不需要直接连接 HTTP NetBird 服务。
 - 本机组件只接收受限动作及 B 站媒体主机，API 密钥在本机读取。二进制响应拆分为小于 1 MiB 的消息，避免 Chrome native messaging 大小限制。
-- `POST /api/v2/browser/sessions` 使用浏览器专用 H.264/fMP4 配置，不更改 mpv 默认的 HEVC/Matroska 输出。
+- `POST /api/v2/browser/sessions` 通过 `video_codec` 选择浏览器的 H.264 或 AV1 分片 MP4 输出。
 - fMP4 初始化头共享，片段保留绝对音视频解码时间，独立片段可用于远距离定位。
 - 播放时暂停并卸下原 DASH source，以 MediaSource 接管相同 video。播放器内核通过 adapter 读取新的时钟和缓冲；关闭时重接原 DASH source 并恢复当前位置。原播放器可继续自行选择合适的源画质。
 - 关闭时并行恢复原播放并回收远端会话，关闭操作完成后可再次开启插帧。

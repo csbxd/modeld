@@ -113,6 +113,6 @@ The browser create body contains `model`, `video`, optional `audio`, optional `v
 
 Inputs use the same validated URL-list/header contract. Both codecs use fragmented MP4 and at most one copied AAC-LC track. AV1 requires an AV1-capable NVENC GPU and a browser that can decode AV1 through MediaSource. Subtitles and overlays are rendered by the website. Normal session requests use the server's Matroska profile.
 
-The response has the normal `id`, `lease_seconds` and `manifest`, plus `mime_type` for MediaSource. The browser profile uses the existing capability media routes and the standard lease/close lifecycle. Every fragment contains absolute tfdt timestamps, so clients append at their actual source timeline positions. The browser transport requires nonnegative source packet decode times.
+The response has the normal `id`, `lease_seconds` and `manifest`, plus `mime_type` for MediaSource. The browser profile uses the existing capability media routes and the standard lease/close lifecycle. The fMP4 initialization segment declares the recording duration in the movie extends header so the browser selects its recorded playback path. Every fragment contains absolute tfdt timestamps, so clients append at their actual source timeline positions. The browser transport requires nonnegative source packet decode times.
 
 The extension communicates through the local native host; no API token or server-control proxy is exposed to the website.

@@ -1,3 +1,4 @@
+#include "modeld/fmp4.hpp"
 #include "modeld/session.hpp"
 #include <atomic>
 #include <cmath>
@@ -274,6 +275,40 @@ void redaction() {
         unsetenv("XDG_STATE_HOME");
     std::filesystem::remove_all(directory);
 }
+
+void fmp4_recording_duration() {
+    std::vector<uint8_t> init{
+        0, 0, 0, 8, 'f', 't', 'y', 'p',
+        0, 0, 0, 52, 'm', 'o', 'o', 'v',
+        0, 0, 0, 28, 'm', 'v', 'h', 'd',
+        0, 0, 0, 0,  // Version and flags
+        0, 0, 0, 0,  // Creation time
+        0, 0, 0, 0,  // Modification time
+        0, 0, 0xac, 0x44,  // Movie timescale: 44100
+        0, 0, 0, 0,  // Duration
+        0, 0, 0, 16, 'm', 'v', 'e', 'x',
+        0, 0, 0, 8, 't', 'r', 'e', 'x',
+    };
+    const auto original = init;
+    auto duration = [&] {
+        uint64_t ticks = 0;
+        for (size_t i = 64; i < 72; ++i)
+            ticks = (ticks << 8) | init.at(i);
+        return ticks;
+    };
+
+    write_fmp4_recording_duration(init, 129600.25);
+    check(init.size() == original.size() + 20 && init[11] == 72 && init[47] == 36,
+          "fMP4 duration updates both enclosing box sizes");
+    check(std::string(init.begin() + 56, init.begin() + 60) == "mehd" && init[60] == 1,
+          "fMP4 metadata marks a recorded stream");
+    check(duration() == 5715371025ULL, "fMP4 duration preserves a recording above 32-bit ticks");
+    check(std::equal(original.begin() + 52, original.end(), init.begin() + 72),
+          "fMP4 recording metadata preserves track defaults");
+    write_fmp4_recording_duration(init, 5.5);
+    check(init.size() == original.size() + 20 && duration() == 242550,
+          "fMP4 replaces an existing duration box");
+}
 } // namespace
 int main() {
     try {
@@ -283,6 +318,7 @@ int main() {
         canceled_open();
         browser_open_timeout();
         redaction();
+        fmp4_recording_duration();
         std::cout << "v2 contract, source ranges, cache and cancellation passed\n";
     } catch (const std::exception &e) {
         std::cerr << e.what() << '\n';

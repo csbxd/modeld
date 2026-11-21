@@ -13,15 +13,20 @@ test('preferences validate values and are manual by default',()=>{
  const prior=preferences({qp:16,av1Qp:36});
  assert.equal(prior.videoCodec,'av1');
  assert.equal(prior.qp,16);
+ assert.equal(prior.av1TargetBitrateMbps,12);
  assert.equal(prior.av1MaxBitrateMbps,18);
  assert.equal('av1Qp' in prior,false);
  const av1=preferences({...prior,videoCodec:'av1',av1MaxBitrateMbps:20});
  assert.equal(av1.qp,16);
+ assert.equal(av1.av1TargetBitrateMbps,12);
  assert.equal(av1.av1MaxBitrateMbps,20);
+ assert.equal(preferences({av1MaxBitrateMbps:9}).av1TargetBitrateMbps,6);
+ assert.equal(preferences({av1TargetBitrateMbps:10}).av1MaxBitrateMbps,18);
+ assert.throws(()=>preferences({av1TargetBitrateMbps:19}),/目标码率不能超过峰值码率/);
  assert.equal(preferences({videoCodec:'h264'}).videoCodec,'h264');
  assert.equal(preferences({bufferSeconds:8,qp:16}).cacheMiB,256);
  for(const value of [{bufferSeconds:0},{cacheMiB:8192},{qp:-1},{backSeconds:-1},{videoCodec:'hevc'},
-  {av1MaxBitrateMbps:0},{av1MaxBitrateMbps:21},{av1MaxBitrateMbps:1.5}])
+  {av1MaxBitrateMbps:0},{av1MaxBitrateMbps:21},{av1MaxBitrateMbps:1.5},{av1TargetBitrateMbps:0}])
   assert.throws(()=>preferences(value));
 });
 test('buffer durations accept large safe integers and survive storage serialization',()=>{
@@ -50,12 +55,12 @@ test('native host negotiates AV1 VBR and sends H.264 requests to older servers',
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'modeld-codec-'));
  const token=path.join(directory,'token'),config=path.join(directory,'client.json');
  const requests=[];
- let advertisesVbr=false;
+ let vbr;
  const server=createServer(async(request,response)=>{
   response.setHeader('content-type','application/json');
   if(request.method==='GET'){
    const capability={video_codec:'h264',video_codecs:['h264','av1']};
-   if(advertisesVbr)capability.av1_vbr={default_max_bitrate_mbps:18};
+   if(vbr)capability.av1_vbr=vbr;
    response.end(JSON.stringify(capability));
    return;
   }
@@ -77,10 +82,15 @@ test('native host negotiates AV1 VBR and sends H.264 requests to older servers',
   await assert.rejects(native.call('open',{video,video_codec:'h264',qp:18}),/Test source/);
   assert.equal('video_codec' in requests[0],false);
   assert.equal(requests[0].qp,18);
-  advertisesVbr=true;
-  await assert.rejects(native.call('open',{video,video_codec:'av1',max_bitrate_mbps:20}),/Test source/);
+  vbr={default_max_bitrate_mbps:18};
+  const av1={video,video_codec:'av1',target_bitrate_mbps:10,max_bitrate_mbps:18};
+  await assert.rejects(native.call('open',av1),/不支持单独设置 AV1 目标码率/);
+  assert.equal(requests.length,1);
+  vbr.target_bitrate_mbps_range=[1,20];
+  await assert.rejects(native.call('open',av1),/Test source/);
   assert.equal(requests[1].video_codec,'av1');
-  assert.equal(requests[1].max_bitrate_mbps,20);
+  assert.equal(requests[1].target_bitrate_mbps,10);
+  assert.equal(requests[1].max_bitrate_mbps,18);
   assert.equal('qp' in requests[1],false);
  }finally{
   const exited=once(native.child,'exit');

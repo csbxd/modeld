@@ -178,10 +178,17 @@ struct Host {
             if (video_codec == "av1") {
                 const auto capabilities =
                     api.request("GET", "/api/v2/browser/capabilities", nullptr, stop);
-                if (!capabilities.value("av1_vbr", Json()).is_object())
+                const auto vbr = capabilities.value("av1_vbr", Json());
+                if (!vbr.is_object())
                     throw Error(422, "远端 modeld 未提供 AV1 VBR，请升级服务端或选择 H.264。",
                                 "unsupported_media");
                 body["video_codec"] = video_codec;
+                if (message.contains("target_bitrate_mbps")) {
+                    if (!vbr.contains("target_bitrate_mbps_range"))
+                        throw Error(422, "远端 modeld 不支持单独设置 AV1 目标码率，请升级服务端。",
+                                    "unsupported_media");
+                    body["target_bitrate_mbps"] = message.at("target_bitrate_mbps");
+                }
                 if (message.contains("max_bitrate_mbps"))
                     body["max_bitrate_mbps"] = message.at("max_bitrate_mbps");
             } else {
@@ -190,6 +197,7 @@ struct Host {
             auto created = api.request("POST", "/api/v2/browser/sessions", body, stop);
             auto normal = created;
             normal.erase("mime_type");
+            normal.erase("av1_vbr");
             const auto info = SessionInfo::parse(normal);
             {
                 std::lock_guard lock(sessions_mutex);

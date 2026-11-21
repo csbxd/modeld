@@ -109,9 +109,9 @@ The browser create body contains `model`, `video`, optional `audio`, and optiona
 | `video_codec` | Video profile | Rate control | Defaults |
 | --- | --- | --- | --- |
 | `h264` (when omitted) | H.264 High 4.2 | Optional integer `qp` in 0–40 | Server output QP |
-| `av1` | AV1 Main tier 4.1, 8-bit | Optional integer `max_bitrate_mbps` in 1–20 | 12 Mbps target and 18 Mbps peak |
+| `av1` | AV1 Main tier 4.1, 8-bit | Optional integers `target_bitrate_mbps` and `max_bitrate_mbps` in 1–20 | 12 Mbps target and 18 Mbps peak |
 
-AV1 VBR derives its target from two thirds of the peak and uses a half-second encoder buffer at the peak rate. The peak applies to video encoding. Audio and container overhead contribute to the delivered bitrate. The Chrome extension defaults to AV1 for new installations.
+The AV1 target must be at or below the peak. A request with an explicit target returns the applied `av1_vbr` settings in `target_bps` and `max_bps`. A request that supplies only a peak uses two thirds of that peak as its target, as in 2.1.6. The encoder buffer holds half a second at the peak rate. Audio and container overhead contribute to the delivered bitrate. The Chrome extension defaults to AV1 for new installations.
 
 Inputs use the same validated URL-list/header contract. Both codecs use fragmented MP4 and at most one copied AAC-LC track. AV1 requires an AV1-capable NVENC GPU and a browser that can decode AV1 through MediaSource. Subtitles and overlays are rendered by the website. Normal session requests use the server's Matroska profile.
 

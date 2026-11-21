@@ -1,7 +1,7 @@
 use crate::{
     config::{
-        Av1Vbr, BrowserCodec, BrowserEncoding, Config, AV1_DEFAULT_MAX_MBPS, AV1_MAX_MBPS,
-        H264_MAX_QP,
+        Av1Vbr, BrowserCodec, BrowserEncoding, Config, AV1_DEFAULT_MAX_MBPS,
+        AV1_DEFAULT_TARGET_MBPS, AV1_MAX_MBPS, H264_MAX_QP,
     },
     engine::Engine,
     error::{ApiError, Result},
@@ -172,6 +172,8 @@ struct BrowserRequest {
     #[serde(default)]
     qp: Option<u32>,
     #[serde(default)]
+    target_bitrate_mbps: Option<u32>,
+    #[serde(default)]
     max_bitrate_mbps: Option<u32>,
     #[serde(default)]
     video_codec: BrowserCodec,
@@ -181,8 +183,9 @@ async fn browser_capabilities() -> Json<serde_json::Value> {
         serde_json::json!({"schema":1,"model":MODEL,"output_fps":60,"container":"fragmented_mp4",
         "video_codec":"h264","video_codecs":BrowserCodec::ALL,"audio_codec":"aac_lc","precision":"fp32",
         "qp_min":0,"qp_max":H264_MAX_QP,"av1_vbr":{
-            "default_target_bitrate_mbps":AV1_DEFAULT_MAX_MBPS * 2 / 3,
+            "default_target_bitrate_mbps":AV1_DEFAULT_TARGET_MBPS,
             "default_max_bitrate_mbps":AV1_DEFAULT_MAX_MBPS,
+            "target_bitrate_mbps_range":[1,AV1_MAX_MBPS],
             "max_bitrate_mbps_range":[1,AV1_MAX_MBPS]}}),
     )
 }
@@ -193,8 +196,8 @@ async fn browser_create(
     let request = body(request)?;
     let output = match request.video_codec {
         BrowserCodec::H264 => {
-            if request.max_bitrate_mbps.is_some() {
-                return Err(ApiError::invalid("max_bitrate_mbps requires AV1"));
+            if request.target_bitrate_mbps.is_some() || request.max_bitrate_mbps.is_some() {
+                return Err(ApiError::invalid("Bitrate settings require AV1"));
             }
             let qp = request.qp.unwrap_or(app.config.output.qp);
             if qp > H264_MAX_QP {
@@ -206,11 +209,16 @@ async fn browser_create(
         }
         BrowserCodec::Av1 => {
             if request.qp.is_some() {
-                return Err(ApiError::invalid(
-                    "AV1 VBR uses max_bitrate_mbps instead of qp",
-                ));
+                return Err(ApiError::invalid("Use bitrate settings for AV1 VBR"));
             }
-            BrowserEncoding::Av1(Av1Vbr::from_max_mbps(
+            let target = request.target_bitrate_mbps.or_else(|| {
+                request
+                    .max_bitrate_mbps
+                    .is_none()
+                    .then_some(AV1_DEFAULT_TARGET_MBPS)
+            });
+            BrowserEncoding::Av1(Av1Vbr::from_mbps(
+                target,
                 request.max_bitrate_mbps.unwrap_or(AV1_DEFAULT_MAX_MBPS),
             )?)
         }
@@ -229,6 +237,9 @@ async fn browser_create(
     let mut value = serde_json::to_value(&created)
         .map_err(|_| ApiError::new(500, "invalid_response", "Cannot encode session"))?;
     value["mime_type"] = serde_json::json!(stream.stream.content_type());
+    if let (Some(_), BrowserEncoding::Av1(vbr)) = (request.target_bitrate_mbps, output) {
+        value["av1_vbr"] = serde_json::json!(vbr);
+    }
     Ok((code, Json(value)))
 }
 async fn close(State(app): State<Arc<App>>, Path(id): Path<String>) -> StatusCode {

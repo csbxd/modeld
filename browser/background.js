@@ -78,9 +78,9 @@ async function route(message,sender){
     const state={cache:new Map(),cacheBytes:0,clock:0,paused:true,error:null};tabs.set(tabId,state);
     const local=await chrome.storage.local.get('preferences'),pref=preferences(local.preferences);
     const source=await page(tabId,'probe');
-    const output={
-      video_codec:pref.videoCodec,qp:pref.videoCodec==='av1'?pref.av1Qp:pref.qp
-    };
+    const output=pref.videoCodec==='av1'
+      ?{video_codec:'av1',max_bitrate_mbps:pref.av1MaxBitrateMbps}
+      :{video_codec:'h264',qp:pref.qp};
     let created;const deadline=Date.now()+45000;
     for(;;){
       if(tabs.get(tabId)!==state)throw Error('已取消插帧');

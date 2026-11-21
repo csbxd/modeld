@@ -12,10 +12,14 @@ struct Segment {
     int frames = 0;
     double seconds = 0;
 };
+struct Av1Vbr {
+    int target_bps, max_bps;
+};
 struct RenderSettings {
     int segment_seconds = 2, qp = 18, source_timeout_seconds = 30;
     std::string encoder = "hevc_nvenc";
     bool fragmented_mp4 = false;
+    std::optional<Av1Vbr> av1_vbr;
 };
 using RifeFactory = std::function<std::shared_ptr<Rife>(int, int)>;
 class MediaStream {

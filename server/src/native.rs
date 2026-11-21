@@ -144,7 +144,7 @@ impl Engine for Backend {
         )?;
         let settings = cstring(
             &serde_json::json!({"segment_seconds":config.output.segment_seconds,
-            "encoder":config.output.encoder(),"qp":config.output.qp,
+            "encoder":config.output.encoder(),"qp":config.output.quantizer(),"av1_vbr":config.output.av1_vbr(),
             "source_timeout_seconds":config.limits.source_timeout_seconds,"fragmented_mp4":config.output.browser.is_some()})
             .to_string(),
         )?;

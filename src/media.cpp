@@ -172,6 +172,7 @@ struct MediaStream::Impl {
     SwsContext *sws = nullptr;
     int stream = -1, segment_seconds, qp;
     std::string encoder_name;
+    std::optional<Av1Vbr> av1_vbr;
     std::vector<std::string> sources;
     std::string source_headers;
     size_t source_index = 0;
@@ -639,8 +640,15 @@ struct MediaStream::Impl {
         AVDictionary *options = nullptr;
         av_dict_set(&options, "preset", "p4", 0);
         av_dict_set(&options, "tune", "ull", 0);
-        av_dict_set(&options, "rc", "constqp", 0);
-        av_dict_set_int(&options, "qp", qp, 0);
+        if (av1_vbr) {
+            encoder->bit_rate = av1_vbr->target_bps;
+            encoder->rc_max_rate = av1_vbr->max_bps;
+            encoder->rc_buffer_size = av1_vbr->max_bps / 2;
+            av_dict_set(&options, "rc", "vbr", 0);
+        } else {
+            av_dict_set(&options, "rc", "constqp", 0);
+            av_dict_set_int(&options, "qp", qp, 0);
+        }
         av_dict_set(&options, "zerolatency", "1", 0);
         av_dict_set(&options, "forced-idr", "1", 0);
         av_dict_set(&options, "delay", "0", 0);
@@ -767,6 +775,11 @@ MediaStream::MediaStream(Input video, std::optional<Input> audio, TrackSelection
                                   settings.source_timeout_seconds)) {
     auto &v = *impl;
     v.fragmented_mp4 = settings.fragmented_mp4;
+    v.av1_vbr = settings.av1_vbr;
+    if ((settings.encoder == "av1_nvenc") != v.av1_vbr.has_value() ||
+        (v.av1_vbr && (v.av1_vbr->target_bps <= 0 || v.av1_vbr->max_bps <= 1 ||
+                       v.av1_vbr->target_bps > v.av1_vbr->max_bps)))
+        throw Error(422, "Invalid AV1 VBR encoder settings");
     v.selection = tracks;
     v.audio_source = std::move(audio);
     if (settings.source_timeout_seconds < 1 || settings.source_timeout_seconds > 120)

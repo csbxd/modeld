@@ -104,12 +104,14 @@ Successful segment headers include `X-Modeld-Frames` and `X-Modeld-Render-Second
 
 `GET /api/v2/browser/capabilities` and `POST /api/v2/browser/sessions` require the control Bearer token.
 
-The browser create body contains `model`, `video`, optional `audio`, optional `video_codec` and optional integer `qp`. The capabilities response lists accepted codec identifiers in `video_codecs`. The existing `video_codec`, `qp_min` and `qp_max` capability fields describe the default H.264 profile.
+The browser create body contains `model`, `video`, optional `audio`, and optional `video_codec`. The capabilities response lists codecs in `video_codecs`, H.264 limits in `qp_min` and `qp_max`, and AV1 defaults and limits in `av1_vbr`.
 
-| `video_codec` | Video profile | QP range | Default QP |
+| `video_codec` | Video profile | Rate control | Defaults |
 | --- | --- | --- | --- |
-| `h264` (default) | H.264 High 4.2 | 0–40 | Server output QP |
-| `av1` | AV1 Main 4.1, 8-bit | 0–255 | 36 |
+| `h264` (when omitted) | H.264 High 4.2 | Optional integer `qp` in 0–40 | Server output QP |
+| `av1` | AV1 Main tier 4.1, 8-bit | Optional integer `max_bitrate_mbps` in 1–20 | 12 Mbps target and 18 Mbps peak |
+
+AV1 VBR derives its target from two thirds of the peak and uses a half-second encoder buffer at the peak rate. The peak applies to video encoding. Audio and container overhead contribute to the delivered bitrate. The Chrome extension defaults to AV1 for new installations.
 
 Inputs use the same validated URL-list/header contract. Both codecs use fragmented MP4 and at most one copied AAC-LC track. AV1 requires an AV1-capable NVENC GPU and a browser that can decode AV1 through MediaSource. Subtitles and overlays are rendered by the website. Normal session requests use the server's Matroska profile.
 

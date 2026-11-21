@@ -10,15 +10,18 @@ import path from'node:path';
 import{Native}from'../tools/browser/native.mjs';
 test('preferences validate values and are manual by default',()=>{
  assert.equal(defaults.autoEnable,false);
- const prior=preferences({qp:16});
- assert.equal(prior.videoCodec,'h264');
+ const prior=preferences({qp:16,av1Qp:36});
+ assert.equal(prior.videoCodec,'av1');
  assert.equal(prior.qp,16);
- assert.equal(prior.av1Qp,36);
- const av1=preferences({...prior,videoCodec:'av1',av1Qp:45});
+ assert.equal(prior.av1MaxBitrateMbps,18);
+ assert.equal('av1Qp' in prior,false);
+ const av1=preferences({...prior,videoCodec:'av1',av1MaxBitrateMbps:20});
  assert.equal(av1.qp,16);
- assert.equal(av1.av1Qp,45);
+ assert.equal(av1.av1MaxBitrateMbps,20);
+ assert.equal(preferences({videoCodec:'h264'}).videoCodec,'h264');
  assert.equal(preferences({bufferSeconds:8,qp:16}).cacheMiB,256);
- for(const value of [{bufferSeconds:0},{cacheMiB:8192},{qp:-1},{backSeconds:-1},{videoCodec:'hevc'},{av1Qp:256},{av1Qp:1.5}])
+ for(const value of [{bufferSeconds:0},{cacheMiB:8192},{qp:-1},{backSeconds:-1},{videoCodec:'hevc'},
+  {av1MaxBitrateMbps:0},{av1MaxBitrateMbps:21},{av1MaxBitrateMbps:1.5}])
   assert.throws(()=>preferences(value));
 });
 test('buffer durations accept large safe integers and survive storage serialization',()=>{
@@ -43,16 +46,16 @@ test('native host never exposes the credential and rejects foreign media hosts',
   await assert.rejects(native.call('open',{video:['https://foreign.example/private'],audio:null}),/Bilibili media host/);
  }finally{native.close();await new Promise(resolve=>native.child.once('exit',resolve));fs.rmSync(directory,{recursive:true,force:true});}
 });
-test('native host negotiates AV1 and sends H.264 requests to older servers',async()=>{
+test('native host negotiates AV1 VBR and sends H.264 requests to older servers',async()=>{
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'modeld-codec-'));
  const token=path.join(directory,'token'),config=path.join(directory,'client.json');
  const requests=[];
- let advertisesAv1=false;
+ let advertisesVbr=false;
  const server=createServer(async(request,response)=>{
   response.setHeader('content-type','application/json');
   if(request.method==='GET'){
-   const capability={video_codec:'h264'};
-   if(advertisesAv1)capability.video_codecs=['h264','av1'];
+   const capability={video_codec:'h264',video_codecs:['h264','av1']};
+   if(advertisesVbr)capability.av1_vbr={default_max_bitrate_mbps:18};
    response.end(JSON.stringify(capability));
    return;
   }
@@ -69,15 +72,16 @@ test('native host negotiates AV1 and sends H.264 requests to older servers',asyn
  const native=new Native(process.env.MODELD_BROWSER_HOST||'./build-browser/modeld-browser-host',config);
  const video=['https://upos-test.bilivideo.com/video.m4s'];
  try{
-  await assert.rejects(native.call('open',{video,video_codec:'av1',qp:45}),/未提供 AV1/);
+  await assert.rejects(native.call('open',{video,video_codec:'av1',max_bitrate_mbps:20}),/未提供 AV1 VBR/);
   assert.equal(requests.length,0);
   await assert.rejects(native.call('open',{video,video_codec:'h264',qp:18}),/Test source/);
   assert.equal('video_codec' in requests[0],false);
   assert.equal(requests[0].qp,18);
-  advertisesAv1=true;
-  await assert.rejects(native.call('open',{video,video_codec:'av1',qp:45}),/Test source/);
+  advertisesVbr=true;
+  await assert.rejects(native.call('open',{video,video_codec:'av1',max_bitrate_mbps:20}),/Test source/);
   assert.equal(requests[1].video_codec,'av1');
-  assert.equal(requests[1].qp,45);
+  assert.equal(requests[1].max_bitrate_mbps,20);
+  assert.equal('qp' in requests[1],false);
  }finally{
   const exited=once(native.child,'exit');
   native.close();

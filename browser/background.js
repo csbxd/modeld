@@ -79,7 +79,7 @@ async function route(message,sender){
     const local=await chrome.storage.local.get('preferences'),pref=preferences(local.preferences);
     const source=await page(tabId,'probe');
     const output=pref.videoCodec==='av1'
-      ?{video_codec:'av1',max_bitrate_mbps:pref.av1MaxBitrateMbps}
+      ?{video_codec:'av1',target_bitrate_mbps:pref.av1TargetBitrateMbps,max_bitrate_mbps:pref.av1MaxBitrateMbps}
       :{video_codec:'h264',qp:pref.qp};
     let created;const deadline=Date.now()+45000;
     for(;;){
@@ -88,6 +88,11 @@ async function route(message,sender){
       catch(error){if(error.code!=='session_limit'||!error.retryable||Date.now()>=deadline)throw error;await new Promise(resolve=>setTimeout(resolve,250));}
     }
     if(tabs.get(tabId)!==state){await native('close',{session:created.id});throw Error('已取消插帧');}
+    if(pref.videoCodec==='av1'&&(created.av1_vbr?.target_bps!==pref.av1TargetBitrateMbps*1000000
+        ||created.av1_vbr?.max_bps!==pref.av1MaxBitrateMbps*1000000)){
+      await native('close',{session:created.id}).catch(()=>{});
+      throw Error('无法确认 AV1 码率，请更新本机组件和服务端');
+    }
     state.created=created;state.preferences=pref;
     const renew=()=>native('lease',{session:created.id,paused:state.paused})
       .then(()=>{state.error=null;},error=>{state.error=error.message;});

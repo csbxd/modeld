@@ -432,13 +432,16 @@ async fn browser_profile_has_its_own_authenticated_contract() {
     assert_eq!(capabilities["video_codecs"], json!(["h264", "av1"]));
     assert_eq!(
         capabilities["av1_vbr"],
-        json!({"default_target_bitrate_mbps":12,
+        json!({"default_target_bitrate_mbps":12,"target_bitrate_mbps_range":[1,20],
         "default_max_bitrate_mbps":18,"max_bitrate_mbps_range":[1,20]})
     );
     for (codec, key, value) in [
         ("h264", "qp", 41),
         ("h264", "max_bitrate_mbps", 18),
+        ("h264", "target_bitrate_mbps", 12),
         ("av1", "qp", 18),
+        ("av1", "target_bitrate_mbps", 0),
+        ("av1", "target_bitrate_mbps", 19),
         ("av1", "max_bitrate_mbps", 0),
         ("av1", "max_bitrate_mbps", 21),
         ("hevc", "qp", 18),
@@ -463,6 +466,9 @@ async fn browser_profile_has_its_own_authenticated_contract() {
     av1["video_codec"] = "av1".into();
     let mut limited = av1.clone();
     limited["max_bitrate_mbps"] = 15.into();
+    let mut custom = av1.clone();
+    custom["target_bitrate_mbps"] = 10.into();
+    custom["max_bitrate_mbps"] = 18.into();
     for (request, mime, encoding) in [
         (
             body(),
@@ -485,7 +491,16 @@ async fn browser_profile_has_its_own_authenticated_contract() {
                 max_bps: 15_000_000,
             }),
         ),
+        (
+            custom,
+            "video/mp4; codecs=\"av01.0.09M.08,mp4a.40.2\"",
+            BrowserEncoding::Av1(Av1Vbr {
+                target_bps: 10_000_000,
+                max_bps: 18_000_000,
+            }),
+        ),
     ] {
+        let explicit_target = request.get("target_bitrate_mbps").is_some();
         let (status, created) = json_request(
             router.clone(),
             "POST",
@@ -497,6 +512,11 @@ async fn browser_profile_has_its_own_authenticated_contract() {
         assert_eq!(status, 201);
         assert_eq!(created["mime_type"], mime);
         assert_eq!(*fake.last_browser.lock().unwrap(), Some(encoding));
+        if let (true, BrowserEncoding::Av1(vbr)) = (explicit_target, encoding) {
+            assert_eq!(created["av1_vbr"], json!(vbr));
+        } else {
+            assert!(created.get("av1_vbr").is_none());
+        }
         let id = created["id"].as_str().unwrap();
         assert_eq!(
             json_request(

@@ -49,6 +49,7 @@ pub struct Output {
     pub browser: Option<BrowserEncoding>,
 }
 pub const H264_MAX_QP: u32 = 40;
+pub const AV1_DEFAULT_TARGET_MBPS: u32 = 12;
 pub const AV1_DEFAULT_MAX_MBPS: u32 = 18;
 // AV1 level 4.1 Main tier limits 1080p60 video to 20 Mbps.
 pub const AV1_MAX_MBPS: u32 = 20;
@@ -59,15 +60,21 @@ pub struct Av1Vbr {
     pub max_bps: u32,
 }
 impl Av1Vbr {
-    pub fn from_max_mbps(max_mbps: u32) -> Result<Self> {
+    pub fn from_mbps(target_mbps: Option<u32>, max_mbps: u32) -> Result<Self> {
         if !(1..=AV1_MAX_MBPS).contains(&max_mbps) {
             return Err(ApiError::invalid(format!(
                 "AV1 peak bitrate must be between 1 and {AV1_MAX_MBPS} Mbps"
             )));
         }
+        if target_mbps.is_some_and(|target| !(1..=max_mbps).contains(&target)) {
+            return Err(ApiError::invalid(format!(
+                "AV1 target bitrate must be between 1 and the peak bitrate ({max_mbps} Mbps)"
+            )));
+        }
         let max_bps = max_mbps * 1_000_000;
         Ok(Self {
-            target_bps: max_bps * 2 / 3,
+            // Peak-only requests use the 2.1.6 bitrate selection.
+            target_bps: target_mbps.map_or(max_bps * 2 / 3, |target| target * 1_000_000),
             max_bps,
         })
     }

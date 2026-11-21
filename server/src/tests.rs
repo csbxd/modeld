@@ -1,6 +1,6 @@
 use crate::{
     api::{self, App},
-    config::{BrowserCodec, Config},
+    config::{Av1Vbr, BrowserEncoding, Config},
     engine::{Engine, Segment, Stream},
     error::{ApiError, Result},
     native::Cancellation,
@@ -42,9 +42,10 @@ struct Fake {
     probe_started: AtomicBool,
     canceled_probes: AtomicUsize,
     gate: Option<Arc<Gate>>,
+    last_browser: Mutex<Option<BrowserEncoding>>,
 }
 struct FakeStream {
-    browser: Option<BrowserCodec>,
+    browser: Option<BrowserEncoding>,
     media: Media,
     calls: Arc<Mutex<BTreeMap<u64, usize>>>,
     canceled: Arc<AtomicUsize>,
@@ -66,6 +67,7 @@ impl Engine for Fake {
             self.canceled_probes.fetch_add(1, Ordering::Relaxed);
             return Err(ApiError::new(499, "canceled", "Probe canceled"));
         }
+        *self.last_browser.lock().unwrap() = config.output.browser;
         Ok(Arc::new(FakeStream {
             browser: config.output.browser,
             media: Media {
@@ -88,8 +90,8 @@ impl Engine for Fake {
 impl Stream for FakeStream {
     fn content_type(&self) -> &str {
         match self.browser {
-            Some(BrowserCodec::H264) => "video/mp4; codecs=\"avc1.64002A,mp4a.40.2\"",
-            Some(BrowserCodec::Av1) => "video/mp4; codecs=\"av01.0.09M.08,mp4a.40.2\"",
+            Some(BrowserEncoding::H264 { .. }) => "video/mp4; codecs=\"avc1.64002A,mp4a.40.2\"",
+            Some(BrowserEncoding::Av1(_)) => "video/mp4; codecs=\"av01.0.09M.08,mp4a.40.2\"",
             None => "video/x-matroska",
         }
     }
@@ -403,7 +405,8 @@ async fn disconnecting_probe_cancels_native_work_and_releases_its_slot() {
 }
 #[tokio::test]
 async fn browser_profile_has_its_own_authenticated_contract() {
-    let app = App::new(config(), TOKEN.into(), Arc::new(Fake::default()));
+    let fake = Arc::new(Fake::default());
+    let app = App::new(config(), TOKEN.into(), fake.clone());
     let router = api::router(app.clone());
     assert_eq!(
         json_request(
@@ -427,10 +430,22 @@ async fn browser_profile_has_its_own_authenticated_contract() {
     .await;
     assert_eq!(capabilities["video_codec"], "h264");
     assert_eq!(capabilities["video_codecs"], json!(["h264", "av1"]));
-    for (codec, qp) in [("h264", 41), ("av1", 256), ("hevc", 18)] {
+    assert_eq!(
+        capabilities["av1_vbr"],
+        json!({"default_target_bitrate_mbps":12,
+        "default_max_bitrate_mbps":18,"max_bitrate_mbps_range":[1,20]})
+    );
+    for (codec, key, value) in [
+        ("h264", "qp", 41),
+        ("h264", "max_bitrate_mbps", 18),
+        ("av1", "qp", 18),
+        ("av1", "max_bitrate_mbps", 0),
+        ("av1", "max_bitrate_mbps", 21),
+        ("hevc", "qp", 18),
+    ] {
         let mut request = body();
         request["video_codec"] = codec.into();
-        request["qp"] = qp.into();
+        request[key] = value.into();
         assert_eq!(
             json_request(
                 router.clone(),
@@ -446,10 +461,30 @@ async fn browser_profile_has_its_own_authenticated_contract() {
     }
     let mut av1 = body();
     av1["video_codec"] = "av1".into();
-    av1["qp"] = 45.into();
-    for (request, mime) in [
-        (body(), "video/mp4; codecs=\"avc1.64002A,mp4a.40.2\""),
-        (av1, "video/mp4; codecs=\"av01.0.09M.08,mp4a.40.2\""),
+    let mut limited = av1.clone();
+    limited["max_bitrate_mbps"] = 15.into();
+    for (request, mime, encoding) in [
+        (
+            body(),
+            "video/mp4; codecs=\"avc1.64002A,mp4a.40.2\"",
+            BrowserEncoding::H264 { qp: 18 },
+        ),
+        (
+            av1,
+            "video/mp4; codecs=\"av01.0.09M.08,mp4a.40.2\"",
+            BrowserEncoding::Av1(Av1Vbr {
+                target_bps: 12_000_000,
+                max_bps: 18_000_000,
+            }),
+        ),
+        (
+            limited,
+            "video/mp4; codecs=\"av01.0.09M.08,mp4a.40.2\"",
+            BrowserEncoding::Av1(Av1Vbr {
+                target_bps: 10_000_000,
+                max_bps: 15_000_000,
+            }),
+        ),
     ] {
         let (status, created) = json_request(
             router.clone(),
@@ -461,6 +496,7 @@ async fn browser_profile_has_its_own_authenticated_contract() {
         .await;
         assert_eq!(status, 201);
         assert_eq!(created["mime_type"], mime);
+        assert_eq!(*fake.last_browser.lock().unwrap(), Some(encoding));
         let id = created["id"].as_str().unwrap();
         assert_eq!(
             json_request(

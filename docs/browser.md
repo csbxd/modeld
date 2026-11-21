@@ -4,11 +4,11 @@ Chrome Manifest V3 扩展，在 B 站原播放器里使用远端 RIFE 4.26 Heavy
 
 ## 配置
 
-扩展设置页提供服务地址、可选直连 IP、API 密钥、前后缓冲、分段缓存、编码 QP 和自动开启选项。默认读取本机 `~/.config/modeld/client.json`，无需再次填写当前服务器信息。用户更改的浏览器连接配置保存在 `~/.config/modeld/browser.json`，新输入密钥写入该文件旁的私有 token 文件，权限均为 0600。
+扩展设置页提供服务地址、可选直连 IP、API 密钥、前后缓冲、分段缓存、编码参数和自动开启选项。默认读取本机 `~/.config/modeld/client.json`，无需再次填写当前服务器信息。用户更改的浏览器连接配置保存在 `~/.config/modeld/browser.json`，新输入密钥写入该文件旁的私有 token 文件，权限均为 0600。
 
 密钥由本机 native messaging 程序读取，不放入网页或扩展消息中的媒体地址。播放偏好保存在 Chrome 本机存储。默认手动开启，二维日漫保持关闭；自动开启需自行确认片源类型。
 
-支持当前 modeld 的 SDR、原生 1080p 范围、低于 60 fps 的输入。设置页可选择 H.264 或 AV1。AV1 需要 modeld 2.1.4 或更新版本、支持 AV1 编码的 NVENC 显卡和支持 AV1 MediaSource 播放的浏览器。两种编码均输出 60 fps 分片 MP4 与原 AAC-LC 音轨，分别保存 QP。H.264 默认 QP 18，AV1 默认 QP 36，数值越低时画质和码率通常越高。保存后重新开启插帧即可使用所选编码。
+支持当前 modeld 的 SDR、原生 1080p 范围、低于 60 fps 的输入。扩展默认选择 AV1 VBR，输出 60 fps 分片 MP4 与原 AAC-LC 音轨。AV1 默认目标 12 Mbps、峰值 18 Mbps，设置页可填 1 至 20 Mbps 的峰值，服务端按峰值的约 2/3 设置目标。AV1 VBR 需要 modeld 2.1.6 或更新版本、支持 AV1 编码的 NVENC 显卡和支持 AV1 MediaSource 播放的浏览器。设置页也可选择 H.264，默认 QP 18。保存后重新开启插帧即可使用所选编码。
 
 开启前检查实际选中的音轨。当前浏览器传输支持标准 AAC-LC；选中 Dolby 或 Hi-Res 音轨时，页面会提示切换音质，由用户选择后再开启插帧。
 

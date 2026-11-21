@@ -99,10 +99,14 @@ void *modeld_stream_open(void *context, const char *request_json, const char *se
         const auto config = modeld::Json::parse(settings_json);
         modeld::require_keys(request, {"model", "video", "audio", "tracks"});
         modeld::require_keys(config, {"segment_seconds", "encoder", "qp", "source_timeout_seconds",
-                                      "fragmented_mp4"});
+                                      "fragmented_mp4", "av1_vbr"});
         modeld::RenderSettings settings{config.at("segment_seconds"), config.at("qp"),
                                         config.at("source_timeout_seconds"), config.at("encoder"),
-                                        config.at("fragmented_mp4")};
+                                        config.at("fragmented_mp4"), std::nullopt};
+        if (auto vbr = config.find("av1_vbr"); vbr != config.end() && !vbr->is_null()) {
+            modeld::require_keys(*vbr, {"target_bps", "max_bps"});
+            settings.av1_vbr = modeld::Av1Vbr{vbr->at("target_bps"), vbr->at("max_bps")};
+        }
         auto video = modeld::Input::parse(request.at("video"));
         std::optional<modeld::Input> audio;
         if (request.contains("audio") && !request.at("audio").is_null())

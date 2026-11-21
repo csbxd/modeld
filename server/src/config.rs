@@ -46,7 +46,36 @@ pub struct Output {
     pub codec: Codec,
     pub qp: u32,
     #[serde(skip)]
-    pub browser: Option<BrowserCodec>,
+    pub browser: Option<BrowserEncoding>,
+}
+pub const H264_MAX_QP: u32 = 40;
+pub const AV1_DEFAULT_MAX_MBPS: u32 = 18;
+// AV1 level 4.1 Main tier limits 1080p60 video to 20 Mbps.
+pub const AV1_MAX_MBPS: u32 = 20;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct Av1Vbr {
+    pub target_bps: u32,
+    pub max_bps: u32,
+}
+impl Av1Vbr {
+    pub fn from_max_mbps(max_mbps: u32) -> Result<Self> {
+        if !(1..=AV1_MAX_MBPS).contains(&max_mbps) {
+            return Err(ApiError::invalid(format!(
+                "AV1 peak bitrate must be between 1 and {AV1_MAX_MBPS} Mbps"
+            )));
+        }
+        let max_bps = max_mbps * 1_000_000;
+        Ok(Self {
+            target_bps: max_bps * 2 / 3,
+            max_bps,
+        })
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BrowserEncoding {
+    H264 { qp: u32 },
+    Av1(Av1Vbr),
 }
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -71,33 +100,27 @@ pub enum BrowserCodec {
 }
 impl BrowserCodec {
     pub const ALL: [Self; 2] = [Self::H264, Self::Av1];
-
-    pub fn encoder(self) -> &'static str {
-        match self {
-            Self::H264 => Codec::H264.encoder(),
-            Self::Av1 => "av1_nvenc",
-        }
-    }
-
-    pub fn max_qp(self) -> u32 {
-        match self {
-            Self::H264 => 40,
-            Self::Av1 => 255,
-        }
-    }
-
-    pub fn default_qp(self, h264_qp: u32) -> u32 {
-        match self {
-            Self::H264 => h264_qp,
-            Self::Av1 => 36,
-        }
-    }
 }
 impl Output {
     pub fn encoder(&self) -> &'static str {
         match self.browser {
-            Some(codec) => codec.encoder(),
+            Some(BrowserEncoding::H264 { .. }) => Codec::H264.encoder(),
+            Some(BrowserEncoding::Av1(_)) => "av1_nvenc",
             None => self.codec.encoder(),
+        }
+    }
+
+    pub fn quantizer(&self) -> u32 {
+        match self.browser {
+            Some(BrowserEncoding::H264 { qp }) => qp,
+            _ => self.qp,
+        }
+    }
+
+    pub fn av1_vbr(&self) -> Option<Av1Vbr> {
+        match self.browser {
+            Some(BrowserEncoding::Av1(vbr)) => Some(vbr),
+            _ => None,
         }
     }
 }
@@ -120,7 +143,7 @@ impl Config {
             || !(30..=86400).contains(&l.lease_seconds)
             || !(1..=120).contains(&l.source_timeout_seconds)
             || !(1..=10).contains(&self.output.segment_seconds)
-            || self.output.qp > 40
+            || self.output.qp > H264_MAX_QP
             || self.inference.model_file.is_empty()
             || self.inference.cache_directory.is_empty()
         {

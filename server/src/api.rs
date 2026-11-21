@@ -1,5 +1,8 @@
 use crate::{
-    config::{BrowserCodec, Config},
+    config::{
+        Av1Vbr, BrowserCodec, BrowserEncoding, Config, AV1_DEFAULT_MAX_MBPS, AV1_MAX_MBPS,
+        H264_MAX_QP,
+    },
     engine::Engine,
     error::{ApiError, Result},
     native::Cancellation,
@@ -113,7 +116,7 @@ async fn create(
 async fn open_session(
     app: Arc<App>,
     request: CreateSession,
-    browser: Option<(BrowserCodec, Option<u32>)>,
+    browser: Option<BrowserEncoding>,
 ) -> Result<(StatusCode, Json<SessionCreated>)> {
     if request.model != MODEL {
         return Err(ApiError::new(404, "unknown_model", "Unknown model"));
@@ -130,10 +133,7 @@ async fn open_session(
     let mut guard = Probe(Some(cancellation.clone()));
     let engine = app.engine.clone();
     let mut config = app.config.clone();
-    if let Some((codec, qp)) = browser {
-        config.output.browser = Some(codec);
-        config.output.qp = qp.unwrap_or_else(|| codec.default_qp(config.output.qp));
-    }
+    config.output.browser = browser;
     let timeout = config.limits.source_timeout_seconds as u64 + 2;
     let started = Instant::now();
     let work = tokio::task::spawn_blocking(move || {
@@ -172,13 +172,18 @@ struct BrowserRequest {
     #[serde(default)]
     qp: Option<u32>,
     #[serde(default)]
+    max_bitrate_mbps: Option<u32>,
+    #[serde(default)]
     video_codec: BrowserCodec,
 }
 async fn browser_capabilities() -> Json<serde_json::Value> {
     Json(
         serde_json::json!({"schema":1,"model":MODEL,"output_fps":60,"container":"fragmented_mp4",
         "video_codec":"h264","video_codecs":BrowserCodec::ALL,"audio_codec":"aac_lc","precision":"fp32",
-        "qp_min":0,"qp_max":BrowserCodec::H264.max_qp()}),
+        "qp_min":0,"qp_max":H264_MAX_QP,"av1_vbr":{
+            "default_target_bitrate_mbps":AV1_DEFAULT_MAX_MBPS * 2 / 3,
+            "default_max_bitrate_mbps":AV1_DEFAULT_MAX_MBPS,
+            "max_bitrate_mbps_range":[1,AV1_MAX_MBPS]}}),
     )
 }
 async fn browser_create(
@@ -186,12 +191,30 @@ async fn browser_create(
     request: std::result::Result<Json<BrowserRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<serde_json::Value>)> {
     let request = body(request)?;
-    let max_qp = request.video_codec.max_qp();
-    if request.qp.is_some_and(|qp| qp > max_qp) {
-        return Err(ApiError::invalid(format!(
-            "QP must be between 0 and {max_qp}"
-        )));
-    }
+    let output = match request.video_codec {
+        BrowserCodec::H264 => {
+            if request.max_bitrate_mbps.is_some() {
+                return Err(ApiError::invalid("max_bitrate_mbps requires AV1"));
+            }
+            let qp = request.qp.unwrap_or(app.config.output.qp);
+            if qp > H264_MAX_QP {
+                return Err(ApiError::invalid(format!(
+                    "QP must be between 0 and {H264_MAX_QP}"
+                )));
+            }
+            BrowserEncoding::H264 { qp }
+        }
+        BrowserCodec::Av1 => {
+            if request.qp.is_some() {
+                return Err(ApiError::invalid(
+                    "AV1 VBR uses max_bitrate_mbps instead of qp",
+                ));
+            }
+            BrowserEncoding::Av1(Av1Vbr::from_max_mbps(
+                request.max_bitrate_mbps.unwrap_or(AV1_DEFAULT_MAX_MBPS),
+            )?)
+        }
+    };
     let source = CreateSession {
         model: request.model,
         video: request.video,
@@ -201,8 +224,7 @@ async fn browser_create(
             subtitles: false,
         },
     };
-    let (code, Json(created)) =
-        open_session(app.clone(), source, Some((request.video_codec, request.qp))).await?;
+    let (code, Json(created)) = open_session(app.clone(), source, Some(output)).await?;
     let stream = app.sessions.get(&created.id)?;
     let mut value = serde_json::to_value(&created)
         .map_err(|_| ApiError::new(500, "invalid_response", "Cannot encode session"))?;

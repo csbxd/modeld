@@ -175,18 +175,17 @@ struct Host {
                          {"video", {{"urls", sources(message.at("video"))}, {"headers", headers}}}};
             if (message.contains("audio") && !message["audio"].is_null())
                 body["audio"] = {{"urls", sources(message["audio"])}, {"headers", headers}};
-            if (message.contains("qp"))
-                body["qp"] = message.at("qp");
-            else if (video_codec == "h264")
-                body["qp"] = 18;
             if (video_codec == "av1") {
                 const auto capabilities =
                     api.request("GET", "/api/v2/browser/capabilities", nullptr, stop);
-                const auto codecs = capabilities.value("video_codecs", Json::array());
-                if (std::find(codecs.begin(), codecs.end(), "av1") == codecs.end())
-                    throw Error(422, "远端 modeld 未提供 AV1，请升级服务端或选择 H.264。",
+                if (!capabilities.value("av1_vbr", Json()).is_object())
+                    throw Error(422, "远端 modeld 未提供 AV1 VBR，请升级服务端或选择 H.264。",
                                 "unsupported_media");
                 body["video_codec"] = video_codec;
+                if (message.contains("max_bitrate_mbps"))
+                    body["max_bitrate_mbps"] = message.at("max_bitrate_mbps");
+            } else {
+                body["qp"] = message.contains("qp") ? message.at("qp") : Json(18);
             }
             auto created = api.request("POST", "/api/v2/browser/sessions", body, stop);
             auto normal = created;
